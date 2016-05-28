@@ -5,7 +5,6 @@ import argparse
 import os
 import sys
 import sqlite3
-from collections import namedtuple
 
 def matcher(col):
     return {
@@ -54,6 +53,7 @@ for root, dirs, files in os.walk(args.input, topdown=True):
         record[matcher('nevra')] = os.path.basename(root)
         for name in files:
             with open(os.path.join(root,name)) as f: record[matcher(name)] =  f.read()
+        #insert row into table
         cursor.execute('INSERT INTO packages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', record)
 
 #save changes
