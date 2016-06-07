@@ -14,6 +14,9 @@ def CONSTRUCT_NAME(row):
 def PACKAGE_DATA_INSERT(cursor,data):
     cursor.execute('INSERT INTO PACKAGE_DATA VALUES (null,?,?,?,?,?,?,?,?,?)', data)
 
+def TRANS_DATA_INSERT(cursor,data):
+    cursor.execute('INSERT INTO TRANSACTION_DATA VALUES (null,?,?,?,?,?,?,?)', data)
+
 #create binding with repo - returns R_ID
 def BIND_REPO(cursor,name):
     cursor.execute('SELECT R_ID FROM REPO WHERE name=?',(name,))
@@ -23,6 +26,11 @@ def BIND_REPO(cursor,name):
         cursor.execute('SELECT last_insert_rowid()')
         R_ID = cursor.fetchone()
     return R_ID[0]
+
+#create binding with transaction_data table - returns TD_ID
+def BIND_TRANS_DATA(h_cursor,PD_ID):
+    h_cursor.execute('SELECT * FROM trans_data_pkgs WHERE pkgtups=?',PD_ID)
+    #TODO
 
 #input argument parser
 parser = argparse.ArgumentParser(description="Unified DNF software database migration tool")
@@ -80,7 +88,8 @@ PACKAGE_DATA = ['P_ID','TD_ID','R_ID','from_repo_revision','from_repo_timestamp'
                     'installed_by','changed_by','installonly','origin_url']
 PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','checksum_type','type']
 CHECKSUM_DATA = ['checksum_data']
-
+TRANSACTION_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
+TRANS_STATE = ['Install','Update','Obsoleting','Updated','Obsoleted']
 
 #create table PACKAGE_DATA
 cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, TD_ID text, R_ID integer, from_repo_revision text,
@@ -92,6 +101,10 @@ cursor.execute('''CREATE TABLE PACKAGE (P_ID integer, name text, epoch text, ver
 
 #create table REPO
 cursor.execute('''CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text, last_synced text, is_expired text)''')
+
+#create table TRANSACTION_DATA
+cursor.execute('''CREATE TABLE TRANSACTION_DATA (TD_ID INTEGER PRIMARY KEY,T_ID integer,PD_ID integer, G_ID integer ,done INTEGER,
+                ORIGINAL_TD_ID integer, reason integer, state integer)''')
 
 #contruction of PACKAGE from pkgtups
 h_cursor.execute('SELECT * FROM pkgtups')
@@ -113,7 +126,7 @@ database.commit()
 
 #construction of PACKAGE_DATA according to pkg_yumdb
 actualPID = 0
-record_PD = ['null'] * len(PACKAGE_DATA)
+record_PD = [''] * len(PACKAGE_DATA)
 h_cursor.execute('SELECT * FROM pkg_yumdb')
 
 #for each row in pkg_yumdb
@@ -123,9 +136,8 @@ for row in h_cursor:
         if actualPID != 0:
             record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
             PACKAGE_DATA_INSERT(cursor,record_PD) #insert new record into PACKAGE_DATA
-            print(record_PD)
         actualPID = newPID
-        record_PD = ['null'] * len(PACKAGE_DATA)
+        record_PD = [''] * len(PACKAGE_DATA)
 
     if row[1] in PACKAGE_DATA:
         record_PD[PACKAGE_DATA.index(row[1])] = row[2] #collect data for record from pkg_yumdb
@@ -134,90 +146,62 @@ for row in h_cursor:
 
 record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
 PACKAGE_DATA_INSERT(cursor,record_PD) #insert last record
-print(record_PD)
 
 #save changes
 database.commit()
 
-pkglist = {}
+#transaction_data construction
+h_cursor.execute('SELECT * FROM trans_data_pkgs')
+for row in h_cursor:
+    record_TD = ['']*len(TRANSACTION_DATA)
+    record_TD[TRANSACTION_DATA.index('T_ID')] = row[0] #T_ID
+    if row[2] == 'TRUE':
+        record_TD[TRANSACTION_DATA.index('done')] = 1
+    else:
+        record_TD[TRANSACTION_DATA.index('done')] = 0
+    record_TD[TRANSACTION_DATA.index('state')] = TRANS_STATE.index(row[3])
+    pkgtups_tmp = int(row[1])
+    cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=?',(pkgtups_tmp,))
+    pkgtups_tmp = cursor.fetchone()
+    if pkgtups_tmp != None:
+        record_TD[TRANSACTION_DATA.index('PD_ID')] = pkgtups_tmp[0]
+    else:
+        task_failed+=1
+    task_performed+=1
+    TRANS_DATA_INSERT(cursor,record_TD)
+
+#TODO číselník pre state, párovenie ORIGINAL_TD_ID
+
+#save changes
+database.commit()
+
+
+
+#probably not neccessary
+#pkglist = {}
 #get package list of yumdb
-for dir in os.listdir(yumdb_path):
-    for subdir in os.listdir(os.path.join(yumdb_path,dir)):
-        pkglist[subdir.partition('-')[2]] = os.path.join(dir,subdir)
-
+#for dir in os.listdir(yumdb_path):
+#    for subdir in os.listdir(os.path.join(yumdb_path,dir)):
+#        pkglist[subdir.partition('-')[2]] = os.path.join(dir,subdir)
+#
 #fetching aditional values from directory yumdb
-cursor.execute('SELECT * FROM PACKAGE')
-for row in cursor:
-    name = CONSTRUCT_NAME(row)
-    if name in pkglist:
-        record_PD = ['null'] * len(PACKAGE_DATA)
-        path = os.path.join(yumdb_path,pkglist[name])
-        for file in os.listdir(path):
-            if file in PACKAGE_DATA:
-                with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index(file)] =  f.read()
-        record_PD[PACKAGE_DATA.index('P_ID')] = row[0]
-        #print(record_PD)
+#cursor.execute('SELECT * FROM PACKAGE')
+#allrows = cursor.fetchall()
+#for row in allrows:
+#    name = CONSTRUCT_NAME(row)
+#    if name in pkglist:
+#        record_PD = ['null'] * len(PACKAGE_DATA)
+#        path = os.path.join(yumdb_path,pkglist[name])
+#        for file in os.listdir(path):
+#            if file in PACKAGE_DATA:
+#                with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index(file)] =  f.read()
+#            elif file == "from_repo":
+#                with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index("R_ID")] = BIND_REPO(cursor, f.read()) #create binding with REPO table
+#        record_PD[PACKAGE_DATA.index('P_ID')] = row[0]
+#        print(record_PD)
 
 
-
-
-
-database.close()
-historyDB.close()
-exit(0)
-
-
-for root, dirs, files in os.walk(yumdb_path, topdown=True):
-    if len(files) > 0:
-        record_PD = [''] * len(PACKAGE_DATA)
-        record_CS = ''
-        record_PD[PACKAGE_DATA.index('PD_ID')] = next(PD_ID)
-        for name in files:
-
-            #determine usage of found file
-            if name in PACKAGE_DATA:
-                with open(os.path.join(root,name)) as f: record_PD[PACKAGE_DATA.index(name)] =  f.read()
-            elif name in CHECKSUM_DATA:
-                with open(os.path.join(root,name)) as f: record_CS =  f.read()
-
-        #pair with PACKAGE via checksum
-        cursor.execute('SELECT P_ID FROM PACKAGE WHERE checksum_data=?',(record_CS,))
-        match = cursor.fetchone()
-
-        #instance with same checksum_data in PACKAGE
-        if match != None :
-            record_PD[PACKAGE_DATA.index('P_ID')] = match[0]
-        else:
-            #pairing via checksum_data failed, add new record
-            record_nevra = os.path.basename(root)
-
-            #split nevra into [name,version,releasever,arch]
-            record_nevra= (record_nevra.partition('-')[2]).rsplit('-',3)
-
-            print(record_nevra)
-
-
-            record_PD[PACKAGE_DATA.index('P_ID')] = 0
-            task_failed += 1
-
-        task_performed+=1
-
-        #insert rows into tables
-        try:
-            cursor.execute('INSERT INTO PACKAGE_DATA VALUES (?,?,?,?,?,?,?,?,?,?)', record_PD)
-        except:
-            task_failed +=1
-        task_performed+=1
-
-
-
-
-#save changes in PACKAGE_DATA and PACKAGE
-database.commit()
-
-#save changes
-#database.commit()
-
+#            record_nevra= (record_nevra.partition('-')[2]).rsplit('-',3)
 #close connection
 database.close()
 historyDB.close()
