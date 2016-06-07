@@ -7,15 +7,26 @@ import sys
 import sqlite3
 import glob
 
-def PD_ID_gen():
-    PD_ID_index = 1
-    while True:
-        yield PD_ID_index
-        PD_ID_index += 1
+def CONSTRUCT_NAME(row):
+    _NAME = row[1] +'-'+ row[3] +'-'+ row[4] +'-'+ row[5]
+    return _NAME
+
+def PACKAGE_DATA_INSERT(cursor,data):
+    cursor.execute('INSERT INTO PACKAGE_DATA VALUES (null,?,?,?,?,?,?,?,?,?)', data)
+
+#create binding with repo - returns R_ID
+def BIND_REPO(cursor,name):
+    cursor.execute('SELECT R_ID FROM REPO WHERE name=?',(name,))
+    R_ID = cursor.fetchone()
+    if R_ID == None:
+        cursor.execute('INSERT INTO REPO VALUES(null,?,0,0)',(name,))
+        cursor.execute('SELECT last_insert_rowid()')
+        R_ID = cursor.fetchone()
+    return R_ID[0]
 
 #input argument parser
 parser = argparse.ArgumentParser(description="Unified DNF software database migration tool")
-parser.add_argument('-i', '--input', help='DNF yumDB and history folder: /var/lib/dnf/', default='/var/lib/dnf/')
+parser.add_argument('-i', '--input', help='DNF yumDB and history folder, default: /var/lib/dnf/', default='/var/lib/dnf/')
 parser.add_argument('-o', '--output', help='output SQLiteDB file, default: ./sw_db.sqlite', default="./sw_db.sqlite")
 parser.add_argument('-f', '--force', help='Force overwrite', action='store_true', default=False)
 args = parser.parse_args()
@@ -56,9 +67,6 @@ if os.path.isfile(args.output):
 task_performed = 0
 task_failed = 0
 
-#intialise IDs
-PD_ID = PD_ID_gen()
-
 #initialise historyDB
 historyDB = sqlite3.connect(historydb_file)
 h_cursor = historyDB.cursor()
@@ -68,19 +76,22 @@ database = sqlite3.connect(args.output)
 cursor = database.cursor()
 
 #value distribution in tables
-PACKAGE_DATA = ['PD_ID','P_ID','TD_ID','R_ID','from_repo_revision','from_repo_timestamp',
+PACKAGE_DATA = ['P_ID','TD_ID','R_ID','from_repo_revision','from_repo_timestamp',
                     'installed_by','changed_by','installonly','origin_url']
 PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','checksum_type','type']
 CHECKSUM_DATA = ['checksum_data']
 
 
 #create table PACKAGE_DATA
-cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer, P_ID integer, TD_ID text, R_ID text, from_repo_revision text,
+cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, TD_ID text, R_ID integer, from_repo_revision text,
                                     from_repo_timestamp text, installed_by text, changed_by text, installonly text,
                                     origin_url text)''')
 #create table PACKAGE
 cursor.execute('''CREATE TABLE PACKAGE (P_ID integer, name text, epoch text, version text, release text, arch text, checksum_data text,
                                     checksum_type text, type integer )''')
+
+#create table REPO
+cursor.execute('''CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text, last_synced text, is_expired text)''')
 
 #contruction of PACKAGE from pkgtups
 h_cursor.execute('SELECT * FROM pkgtups')
@@ -95,16 +106,67 @@ for row in h_cursor:
     record_P[6] = row[6].split(":",2)[1] #checksum_data
     record_P[7] = row[6].split(":",2)[0] #checksum_type
     record_P[8] = 1 #type
-    try:
-        cursor.execute('INSERT INTO PACKAGE VALUES (?,?,?,?,?,?,?,?,?)', record_P)
-    except:
-        task_failed+=1
-    task_performed+=1
+    cursor.execute('INSERT INTO PACKAGE VALUES (?,?,?,?,?,?,?,?,?)', record_P)
 
 #save changes
 database.commit()
 
-#construction of PACKAGE_DATA and matching with PACKAGE
+#construction of PACKAGE_DATA according to pkg_yumdb
+actualPID = 0
+record_PD = ['null'] * len(PACKAGE_DATA)
+h_cursor.execute('SELECT * FROM pkg_yumdb')
+
+#for each row in pkg_yumdb
+for row in h_cursor:
+    newPID = row[0]
+    if actualPID != newPID:
+        if actualPID != 0:
+            record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
+            PACKAGE_DATA_INSERT(cursor,record_PD) #insert new record into PACKAGE_DATA
+            print(record_PD)
+        actualPID = newPID
+        record_PD = ['null'] * len(PACKAGE_DATA)
+
+    if row[1] in PACKAGE_DATA:
+        record_PD[PACKAGE_DATA.index(row[1])] = row[2] #collect data for record from pkg_yumdb
+    elif row[1] == "from_repo":
+        record_PD[PACKAGE_DATA.index("R_ID")] = BIND_REPO(cursor,row[2]) #create binding with REPO table
+
+record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
+PACKAGE_DATA_INSERT(cursor,record_PD) #insert last record
+print(record_PD)
+
+#save changes
+database.commit()
+
+pkglist = {}
+#get package list of yumdb
+for dir in os.listdir(yumdb_path):
+    for subdir in os.listdir(os.path.join(yumdb_path,dir)):
+        pkglist[subdir.partition('-')[2]] = os.path.join(dir,subdir)
+
+#fetching aditional values from directory yumdb
+cursor.execute('SELECT * FROM PACKAGE')
+for row in cursor:
+    name = CONSTRUCT_NAME(row)
+    if name in pkglist:
+        record_PD = ['null'] * len(PACKAGE_DATA)
+        path = os.path.join(yumdb_path,pkglist[name])
+        for file in os.listdir(path):
+            if file in PACKAGE_DATA:
+                with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index(file)] =  f.read()
+        record_PD[PACKAGE_DATA.index('P_ID')] = row[0]
+        #print(record_PD)
+
+
+
+
+
+database.close()
+historyDB.close()
+exit(0)
+
+
 for root, dirs, files in os.walk(yumdb_path, topdown=True):
     if len(files) > 0:
         record_PD = [''] * len(PACKAGE_DATA)
@@ -122,10 +184,19 @@ for root, dirs, files in os.walk(yumdb_path, topdown=True):
         cursor.execute('SELECT P_ID FROM PACKAGE WHERE checksum_data=?',(record_CS,))
         match = cursor.fetchone()
 
-        #no instance with same checksum_data in PACKAGE
+        #instance with same checksum_data in PACKAGE
         if match != None :
             record_PD[PACKAGE_DATA.index('P_ID')] = match[0]
         else:
+            #pairing via checksum_data failed, add new record
+            record_nevra = os.path.basename(root)
+
+            #split nevra into [name,version,releasever,arch]
+            record_nevra= (record_nevra.partition('-')[2]).rsplit('-',3)
+
+            print(record_nevra)
+
+
             record_PD[PACKAGE_DATA.index('P_ID')] = 0
             task_failed += 1
 
