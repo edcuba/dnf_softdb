@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 # Eduard Cuba 2016
+# FIXME: PACKAGE:PACKAGE_DATA ratio is 2:1
+#       - create empty PACKAGE_DATA only for binding with TRANS_DATA?
 
 import argparse
 import os
 import sys
 import sqlite3
 import glob
+
+################################# FUNCTIONS ###################################
 
 def CONSTRUCT_NAME(row):
     _NAME = row[1] +'-'+ row[3] +'-'+ row[4] +'-'+ row[5]
@@ -15,7 +19,10 @@ def PACKAGE_DATA_INSERT(cursor,data):
     cursor.execute('INSERT INTO PACKAGE_DATA VALUES (null,?,?,?,?,?,?,?,?,?)', data)
 
 def TRANS_DATA_INSERT(cursor,data):
-    cursor.execute('INSERT INTO TRANSACTION_DATA VALUES (null,?,?,?,?,?,?,?)', data)
+    cursor.execute('INSERT INTO TRANS_DATA VALUES (null,?,?,?,?,?,?,?)', data)
+
+def TRANS_INSERT(cursor,data):
+    cursor.execute('INSERT INTO TRANS VALUES (?,?,?,?,?,?,?,?)', data)
 
 #create binding with repo - returns R_ID
 def BIND_REPO(cursor,name):
@@ -27,10 +34,58 @@ def BIND_REPO(cursor,name):
         R_ID = cursor.fetchone()
     return R_ID[0]
 
-#create binding with transaction_data table - returns TD_ID
-def BIND_TRANS_DATA(h_cursor,PD_ID):
-    h_cursor.execute('SELECT * FROM trans_data_pkgs WHERE pkgtups=?',PD_ID)
-    #TODO
+#create binding with STATE_TYPE - returns ID
+def BIND_STATE(cursor,desc):
+    cursor.execute('SELECT ID FROM STATE_TYPE WHERE description=?',(desc,))
+    STATE_ID = cursor.fetchone()
+    if STATE_ID == None:
+        cursor.execute('INSERT INTO STATE_TYPE VALUES(null,?)',(desc,))
+        cursor.execute('SELECT last_insert_rowid()')
+        STATE_ID = cursor.fetchone()
+    return STATE_ID[0]
+
+#create binding with REASON_TYPE - returns ID
+def BIND_REASON(cursor,desc):
+    cursor.execute('SELECT ID FROM REASON_TYPE WHERE description=?',(desc,))
+    REASON_ID = cursor.fetchone()
+    if REASON_ID == None:
+        cursor.execute('INSERT INTO REASON_TYPE VALUES(null,?)',(desc,))
+        cursor.execute('SELECT last_insert_rowid()')
+        REASON_ID = cursor.fetchone()
+    return REASON_ID[0]
+
+#create binding with OUTPUT_TYPE - returns ID
+def BIND_OUTPUT(cursor,desc):
+    cursor.execute('SELECT ID FROM OUTPUT_TYPE WHERE description=?',(desc,))
+    OUTPUT_ID = cursor.fetchone()
+    if OUTPUT_ID == None:
+        cursor.execute('INSERT INTO OUTPUT_TYPE VALUES(null,?)',(desc,))
+        cursor.execute('SELECT last_insert_rowid()')
+        OUTPUT_ID = cursor.fetchone()
+    return OUTPUT_ID[0]
+
+def BIND_PACKAGE(cursor,desc):
+    cursor.execute('SELECT ID FROM PACKAGE_TYPE WHERE description=?',(desc,))
+    PACKAGE_ID = cursor.fetchone()
+    if PACKAGE_ID == None:
+        cursor.execute('INSERT INTO PACKAGE_TYPE VALUES(null,?)',(desc,))
+        cursor.execute('SELECT last_insert_rowid()')
+        PACKAGE_ID = cursor.fetchone()
+    return PACKAGE_ID[0]
+
+
+#######integrity optimalization######
+def BIND_PID_PDID(cursor,pid):
+    cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=?',(pid,))
+    PPD_ID = cursor.fetchone()
+    if PPD_ID == None:
+        cursor.execute('INSERT INTO PACKAGE_DATA VALUES(null,?,?,?,?,?,?,?,?,?)',(pid,'','','','','','','',''))
+        cursor.execute('SELECT last_insert_rowid()')
+        PPD_ID = cursor.fetchone()
+    return PPD_ID[0]
+#######integrity optimalization######
+
+################################ INPUT PARSER #################################
 
 #input argument parser
 parser = argparse.ArgumentParser(description="Unified DNF software database migration tool")
@@ -71,6 +126,8 @@ if os.path.isfile(args.output):
             exit(2)
     os.remove(args.output)
 
+############################ GLOBAL VARIABLES #################################
+
 #initialise variables
 task_performed = 0
 task_failed = 0
@@ -88,23 +145,46 @@ PACKAGE_DATA = ['P_ID','TD_ID','R_ID','from_repo_revision','from_repo_timestamp'
                     'installed_by','changed_by','installonly','origin_url']
 PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','checksum_type','type']
 CHECKSUM_DATA = ['checksum_data']
-TRANSACTION_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
-TRANS_STATE = ['Install','Update','Obsoleting','Updated','Obsoleted']
+TRANS_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
+TRANS = ['T_ID','beg_timestamp','end_timestamp','RPMDB_version','cmdline','loginuid','releasever','return_code']
+
+############################# TABLE INIT ######################################
 
 #create table PACKAGE_DATA
-cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, TD_ID text, R_ID integer, from_repo_revision text,
-                                    from_repo_timestamp text, installed_by text, changed_by text, installonly text,
-                                    origin_url text)''')
+cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, TD_ID text, R_ID integer,
+            from_repo_revision text, from_repo_timestamp text, installed_by text, changed_by text, installonly text, origin_url text)''')
 #create table PACKAGE
-cursor.execute('''CREATE TABLE PACKAGE (P_ID integer, name text, epoch text, version text, release text, arch text, checksum_data text,
-                                    checksum_type text, type integer )''')
+cursor.execute('''CREATE TABLE PACKAGE (P_ID integer, name text, epoch text, version text, release text, arch text,
+            checksum_data text, checksum_type text, type integer )''')
 
 #create table REPO
 cursor.execute('''CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text, last_synced text, is_expired text)''')
 
-#create table TRANSACTION_DATA
-cursor.execute('''CREATE TABLE TRANSACTION_DATA (TD_ID INTEGER PRIMARY KEY,T_ID integer,PD_ID integer, G_ID integer ,done INTEGER,
-                ORIGINAL_TD_ID integer, reason integer, state integer)''')
+#create table TRANS_DATA
+cursor.execute('''CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,T_ID integer,PD_ID integer, G_ID integer,
+            done INTEGER, ORIGINAL_TD_ID integer, reason integer, state integer)''')
+
+#create table TRANS
+cursor.execute('''CREATE TABLE TRANS (T_ID integer, beg_timestamp text, end_timestamp text, RPMDB_version text,
+            cmdline text, loginuid integer, releasever text, return_code integer)''')
+
+#create table OUTPUT
+cursor.execute('''CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)''')
+
+#create table STATE_TYPE
+cursor.execute('''CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)''')
+
+#create table REASON_TYPE
+cursor.execute('''CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)''')
+
+#create table OUTPUT_TYPE
+cursor.execute('''CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)''')
+
+#create table PACKAGE_TYPE
+cursor.execute('''CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)''')
+
+
+################################ DB CONSTRUCTION ##############################
 
 #contruction of PACKAGE from pkgtups
 h_cursor.execute('SELECT * FROM pkgtups')
@@ -118,7 +198,7 @@ for row in h_cursor:
     record_P[5] = row[2] #arch
     record_P[6] = row[6].split(":",2)[1] #checksum_data
     record_P[7] = row[6].split(":",2)[0] #checksum_type
-    record_P[8] = 1 #type
+    record_P[8] = BIND_PACKAGE(cursor,'default') #type
     cursor.execute('INSERT INTO PACKAGE VALUES (?,?,?,?,?,?,?,?,?)', record_P)
 
 #save changes
@@ -128,7 +208,6 @@ database.commit()
 actualPID = 0
 record_PD = [''] * len(PACKAGE_DATA)
 h_cursor.execute('SELECT * FROM pkg_yumdb')
-
 #for each row in pkg_yumdb
 for row in h_cursor:
     newPID = row[0]
@@ -138,7 +217,6 @@ for row in h_cursor:
             PACKAGE_DATA_INSERT(cursor,record_PD) #insert new record into PACKAGE_DATA
         actualPID = newPID
         record_PD = [''] * len(PACKAGE_DATA)
-
     if row[1] in PACKAGE_DATA:
         record_PD[PACKAGE_DATA.index(row[1])] = row[2] #collect data for record from pkg_yumdb
     elif row[1] == "from_repo":
@@ -147,35 +225,122 @@ for row in h_cursor:
 record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
 PACKAGE_DATA_INSERT(cursor,record_PD) #insert last record
 
+#########integrity optimalization#########
+cursor.execute('SELECT P_ID FROM PACKAGE')
+tmp_row = cursor.fetchall()
+for row in tmp_row:
+    BIND_PID_PDID(cursor,int(row[0]))
+##########################################
+
+
 #save changes
 database.commit()
 
-#transaction_data construction
+#trans_data construction
 h_cursor.execute('SELECT * FROM trans_data_pkgs')
 for row in h_cursor:
-    record_TD = ['']*len(TRANSACTION_DATA)
-    record_TD[TRANSACTION_DATA.index('T_ID')] = row[0] #T_ID
+    record_TD = ['']*len(TRANS_DATA)
+    record_TD[TRANS_DATA.index('T_ID')] = row[0] #T_ID
     if row[2] == 'TRUE':
-        record_TD[TRANSACTION_DATA.index('done')] = 1
+        record_TD[TRANS_DATA.index('done')] = 1
     else:
-        record_TD[TRANSACTION_DATA.index('done')] = 0
-    record_TD[TRANSACTION_DATA.index('state')] = TRANS_STATE.index(row[3])
+        record_TD[TRANS_DATA.index('done')] = 0
+    record_TD[TRANS_DATA.index('state')] = BIND_STATE(cursor,row[3])
     pkgtups_tmp = int(row[1])
     cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=?',(pkgtups_tmp,))
     pkgtups_tmp = cursor.fetchone()
     if pkgtups_tmp != None:
-        record_TD[TRANSACTION_DATA.index('PD_ID')] = pkgtups_tmp[0]
+        record_TD[TRANS_DATA.index('PD_ID')] = pkgtups_tmp[0]
     else:
         task_failed+=1
     task_performed+=1
     TRANS_DATA_INSERT(cursor,record_TD)
 
-#TODO číselník pre state, párovenie ORIGINAL_TD_ID
+#save changes
+database.commit()
+
+#resolve STATE_TYPE
+cursor.execute('SELECT * FROM STATE_TYPE')
+state_types = cursor.fetchall()
+fsm_state = 0
+obsoleting_t = 0
+update_t = 0
+for a in range(len(state_types)):
+    if state_types[a][1] == 'Obsoleting':
+        obsoleting_t = a+1
+    elif state_types[a][1] == 'Update':
+        update_t = a+1
+
+#find ORIGINAL_TD_ID for Obsoleting and upgraded - via FSM
+previous_TD_ID = 0
+cursor.execute('SELECT * FROM TRANS_DATA')
+tmp_row = cursor.fetchall()
+for row in tmp_row:
+    if fsm_state == 0:
+        if row[7] == obsoleting_t:
+            fsm_state = 1
+        elif row[7] == update_t:
+            fsm_state = 1
+        previous_TD_ID = row[0]
+    elif fsm_state == 1:
+        cursor.execute('UPDATE TRANS_DATA SET ORIGINAL_TD_ID = ? WHERE TD_ID = ?',(row[0],previous_TD_ID))
+        fsm_state = 0
+
+#add TD_ID into PACKAGE_DATA
+cursor.execute('SELECT TD_ID,PD_ID FROM TRANS_DATA')
+tmp_row = cursor.fetchall()
+for row in tmp_row:
+    cursor.execute('UPDATE PACKAGE_DATA SET TD_ID = ? WHERE PD_ID = ?',(row))
 
 #save changes
 database.commit()
 
+#Construction of TRANS
+h_cursor.execute('SELECT * FROM trans_beg')
+for row in h_cursor:
+    record_T = [''] * len(TRANS)
+    record_T[TRANS.index('T_ID')] = row[0]
+    record_T[TRANS.index('beg_timestamp')] = row[1]
+    record_T[TRANS.index('RPMDB_version')] = row[2]
+    record_T[TRANS.index('loginuid')] = row[3]
+    TRANS_INSERT(cursor,record_T)
+h_cursor.execute('SELECT * FROM trans_end')
+for row in h_cursor:
+    cursor.execute('UPDATE TRANS SET end_timestamp=?,return_code=? WHERE T_ID = ?',(row[1],row[3],row[0]))
+h_cursor.execute('SELECT * FROM trans_cmdline')
+for row in h_cursor:
+    cursor.execute('UPDATE TRANS SET cmdline=? WHERE T_ID = ?',(row[1],row[0]))
 
+#fetch reason and releasever
+h_cursor.execute('SELECT * FROM pkg_yumdb WHERE yumdb_key = ? OR yumdb_key = ?',('reason','releasever'))
+for row in h_cursor:
+    cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID = ?',(row[0],))
+    actualPDID = cursor.fetchone()
+    if actualPDID != None:
+        actualPDID= actualPDID[0]
+        if row[1] == 'releasever':
+            cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE PD_ID = ?',(actualPDID,))
+            actualTID = cursor.fetchall()
+            if actualTID != None:
+                for tid in actualTID:
+                    cursor.execute('UPDATE TRANS SET releasever=? WHERE T_ID=?',(row[2], tid[0]))
+        else:
+            t_reason = BIND_REASON(cursor,row[2])
+            cursor.execute('UPDATE TRANS_DATA SET reason = ? WHERE PD_ID = ?',(t_reason,actualPDID))
+    else:
+        task_failed+=1
+    task_performed+=1
+
+#contruction of OUTPUT
+h_cursor.execute('SELECT * FROM trans_script_stdout')
+for row in h_cursor:
+    cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stdout')))
+h_cursor.execute('SELECT * FROM trans_error')
+for row in h_cursor:
+    cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
+
+#save changes
+database.commit()
 
 #probably not neccessary
 #pkglist = {}
@@ -202,6 +367,7 @@ database.commit()
 
 
 #            record_nevra= (record_nevra.partition('-')[2]).rsplit('-',3)
+
 #close connection
 database.close()
 historyDB.close()
