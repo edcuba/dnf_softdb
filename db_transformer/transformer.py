@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 # Eduard Cuba 2016
-# FIXME: PACKAGE:PACKAGE_DATA ratio is 2:1
-#       - create empty PACKAGE_DATA only for binding with TRANS_DATA?
 
 import argparse
 import os
@@ -85,6 +83,49 @@ def BIND_PID_PDID(cursor,pid):
     return PPD_ID[0]
 #######integrity optimalization######
 
+#####################################YUMDB#####################################
+def GET_YUMDB_PACKAGES(cursor):
+    pkglist = {}
+    #get package list of yumdb
+    for dir in os.listdir(yumdb_path):
+        for subdir in os.listdir(os.path.join(yumdb_path,dir)):
+            pkglist[subdir.partition('-')[2]] = os.path.join(dir,subdir)
+    #fetching aditional values from directory yumdb
+    cursor.execute('SELECT * FROM PACKAGE')
+    allrows = cursor.fetchall()
+    for row in allrows:
+        name = CONSTRUCT_NAME(row)
+        if name in pkglist:
+            record_PD = [None] * len(PACKAGE_DATA)
+            path = os.path.join(yumdb_path,pkglist[name])
+            for file in os.listdir(path):
+                if file in PACKAGE_DATA:
+                    with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index(file)] =  f.read()
+                elif file == "from_repo":
+                    #create binding with REPO table
+                    with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index("R_ID")] = BIND_REPO(cursor, f.read())
+            actualPDID = BIND_PID_PDID(cursor,row[0])
+            if record_PD[PACKAGE_DATA.index('R_ID')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET R_ID=? WHERE PD_ID=?',(record_PD[PACKAGE_DATA.index('R_ID')],actualPDID))
+            if record_PD[PACKAGE_DATA.index('from_repo_revision')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET from_repo_revision=? WHERE PD_ID=?',
+                (record_PD[PACKAGE_DATA.index('from_repo_revision')],actualPDID))
+            if record_PD[PACKAGE_DATA.index('from_repo_timestamp')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET from_repo_timestamp=? WHERE PD_ID=?',
+                (record_PD[PACKAGE_DATA.index('from_repo_timestamp')],actualPDID))
+            if record_PD[PACKAGE_DATA.index('installed_by')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET installed_by=? WHERE PD_ID=?',
+                (record_PD[PACKAGE_DATA.index('installed_by')],actualPDID))
+            if record_PD[PACKAGE_DATA.index('changed_by')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET changed_by=? WHERE PD_ID=?',
+                (record_PD[PACKAGE_DATA.index('changed_by')],actualPDID))
+            if record_PD[PACKAGE_DATA.index('installonly')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET installonly=? WHERE PD_ID=?',
+                (record_PD[PACKAGE_DATA.index('installonly')],actualPDID))
+            if record_PD[PACKAGE_DATA.index('origin_url')]:
+                cursor.execute('UPDATE PACKAGE_DATA SET origin_url=? WHERE PD_ID=?',
+                (record_PD[PACKAGE_DATA.index('origin_url')],actualPDID))
+
 ################################ INPUT PARSER #################################
 
 #input argument parser
@@ -127,6 +168,8 @@ if os.path.isfile(args.output):
     os.remove(args.output)
 
 ############################ GLOBAL VARIABLES #################################
+
+print('Database transformation running')
 
 #initialise variables
 task_performed = 0
@@ -186,6 +229,8 @@ cursor.execute('''CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description
 
 ################################ DB CONSTRUCTION ##############################
 
+print('Transforming packages')
+
 #contruction of PACKAGE from pkgtups
 h_cursor.execute('SELECT * FROM pkgtups')
 for row in h_cursor:
@@ -196,9 +241,10 @@ for row in h_cursor:
     record_P[3] = row[4] #version
     record_P[4] = row[5] #release
     record_P[5] = row[2] #arch
-    record_P[6] = row[6].split(":",2)[1] #checksum_data
-    record_P[7] = row[6].split(":",2)[0] #checksum_type
-    record_P[8] = BIND_PACKAGE(cursor,'default') #type
+    if row[6]:
+        record_P[6] = row[6].split(":",2)[1] #checksum_data
+        record_P[7] = row[6].split(":",2)[0] #checksum_type
+    record_P[8] = BIND_PACKAGE(cursor,'rpm') #type
     cursor.execute('INSERT INTO PACKAGE VALUES (?,?,?,?,?,?,?,?,?)', record_P)
 
 #save changes
@@ -225,6 +271,9 @@ for row in h_cursor:
 record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
 PACKAGE_DATA_INSERT(cursor,record_PD) #insert last record
 
+#fetch from yumdb
+GET_YUMDB_PACKAGES(cursor)
+
 #########integrity optimalization#########
 cursor.execute('SELECT P_ID FROM PACKAGE')
 tmp_row = cursor.fetchall()
@@ -232,10 +281,10 @@ for row in tmp_row:
     BIND_PID_PDID(cursor,int(row[0]))
 ##########################################
 
-
 #save changes
 database.commit()
 
+print('Transforming transactions')
 #trans_data construction
 h_cursor.execute('SELECT * FROM trans_data_pkgs')
 for row in h_cursor:
@@ -311,25 +360,36 @@ h_cursor.execute('SELECT * FROM trans_cmdline')
 for row in h_cursor:
     cursor.execute('UPDATE TRANS SET cmdline=? WHERE T_ID = ?',(row[1],row[0]))
 
-#fetch reason and releasever
-h_cursor.execute('SELECT * FROM pkg_yumdb WHERE yumdb_key = ? OR yumdb_key = ?',('reason','releasever'))
-for row in h_cursor:
-    cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID = ?',(row[0],))
-    actualPDID = cursor.fetchone()
-    if actualPDID != None:
-        actualPDID= actualPDID[0]
-        if row[1] == 'releasever':
-            cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE PD_ID = ?',(actualPDID,))
-            actualTID = cursor.fetchall()
-            if actualTID != None:
-                for tid in actualTID:
-                    cursor.execute('UPDATE TRANS SET releasever=? WHERE T_ID=?',(row[2], tid[0]))
-        else:
-            t_reason = BIND_REASON(cursor,row[2])
-            cursor.execute('UPDATE TRANS_DATA SET reason = ? WHERE PD_ID = ?',(t_reason,actualPDID))
-    else:
-        task_failed+=1
-    task_performed+=1
+#fetch releasever
+cursor.execute('SELECT T_ID FROM TRANS WHERE releasever=?',('',))
+missing = cursor.fetchall()
+for row in missing:
+    cursor.execute('SELECT PD_ID FROM TRANS_DATA WHERE T_ID=? LIMIT 10',(row[0],))
+    PDID = cursor.fetchall()
+    if PDID != None:
+        for actualPDID in PDID:
+            cursor.execute('SELECT P_ID FROM PACKAGE_DATA WHERE PD_ID=? LIMIT 1',(actualPDID[0],))
+            actualPID = cursor.fetchone()
+            if actualPID != None:
+                h_cursor.execute('SELECT yumdb_val FROM pkg_yumdb WHERE pkgtupid=? AND yumdb_key=? LIMIT 1',(actualPID[0],'releasever'))
+                releasever = h_cursor.fetchone()
+                if releasever != None:
+                    cursor.execute('UPDATE TRANS SET releasever=? WHERE T_ID=?',(releasever[0], row[0]))
+                    break
+
+#fetch reason
+cursor.execute('SELECT TD_ID,PD_ID FROM TRANS_DATA')
+missing = cursor.fetchall()
+for row in missing:
+    cursor.execute('SELECT P_ID FROM PACKAGE_DATA WHERE PD_ID=? LIMIT 1',(row[1],))
+    actualPID = cursor.fetchone()
+    if actualPID != None:
+        h_cursor.execute('SELECT yumdb_val FROM pkg_yumdb WHERE pkgtupid=? AND yumdb_key=? LIMIT 1',(actualPID[0],'reason'))
+        reason = h_cursor.fetchone()
+        if reason != None:
+            t_reason = BIND_REASON(cursor,reason[0])
+            cursor.execute('UPDATE TRANS_DATA SET reason=? WHERE TD_ID=?',(t_reason, row[0]))
+
 
 #contruction of OUTPUT
 h_cursor.execute('SELECT * FROM trans_script_stdout')
@@ -341,32 +401,6 @@ for row in h_cursor:
 
 #save changes
 database.commit()
-
-#probably not neccessary
-#pkglist = {}
-#get package list of yumdb
-#for dir in os.listdir(yumdb_path):
-#    for subdir in os.listdir(os.path.join(yumdb_path,dir)):
-#        pkglist[subdir.partition('-')[2]] = os.path.join(dir,subdir)
-#
-#fetching aditional values from directory yumdb
-#cursor.execute('SELECT * FROM PACKAGE')
-#allrows = cursor.fetchall()
-#for row in allrows:
-#    name = CONSTRUCT_NAME(row)
-#    if name in pkglist:
-#        record_PD = ['null'] * len(PACKAGE_DATA)
-#        path = os.path.join(yumdb_path,pkglist[name])
-#        for file in os.listdir(path):
-#            if file in PACKAGE_DATA:
-#                with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index(file)] =  f.read()
-#            elif file == "from_repo":
-#                with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index("R_ID")] = BIND_REPO(cursor, f.read()) #create binding with REPO table
-#        record_PD[PACKAGE_DATA.index('P_ID')] = row[0]
-#        print(record_PD)
-
-
-#            record_nevra= (record_nevra.partition('-')[2]).rsplit('-',3)
 
 #close connection
 database.close()
