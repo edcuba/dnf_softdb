@@ -238,6 +238,9 @@ cursor.execute('''CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description
 cursor.execute('''CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name text, ui_name text, is_installed integer, exclude text,
                 full_list text, pkg_types integer, grp_types integer)''')
 
+#create table TRANS_GROUP_DATA
+cursor.execute('''CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer, G_ID integer, name text, ui_name text,
+                is_installed integer, exclude text, full_list text, pkg_types integer, grp_types integer)''')
 
 ################################ DB CONSTRUCTION ##############################
 
@@ -431,6 +434,8 @@ if do_groups == 1:
 
 #save changes
 database.commit()
+
+#TODO: construction of TRANS_GROUP_DATA - create Bindings
 
 #close connection
 database.close()
