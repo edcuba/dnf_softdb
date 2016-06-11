@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 # Eduard Cuba 2016
-# FIXME: PACKAGE:PACKAGE_DATA ratio is 2:1
-#       - create empty PACKAGE_DATA only for binding with TRANS_DATA?
 
 import argparse
 import os
 import sys
 import sqlite3
-import datetime
 
 def print_format(*args):
     print('{:>7} | {:<24}| {:<16} | {:<15}|{:^8} '.format(*args))
-
 
 ################################ INPUT PARSER #################################
 

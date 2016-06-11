@@ -6,6 +6,7 @@ import os
 import sys
 import sqlite3
 import glob
+import json
 
 ################################# FUNCTIONS ###################################
 
@@ -138,6 +139,7 @@ no = set(['no','n',''])
 
 yumdb_path = os.path.join(args.input,'yumdb')
 history_path = os.path.join(args.input,'history')
+groups_path = os.path.join(args.input,'groups.json')
 
 #check path to yumdb dir
 if not os.path.isdir(yumdb_path):
@@ -148,6 +150,11 @@ if not os.path.isdir(yumdb_path):
 if not os.path.isdir(history_path):
     sys.stderr.write('Error: history directory not valid\n')
     exit(1)
+
+do_groups = 1
+#check groups path
+if not os.path.isfile(groups_path):
+    do_groups = 0
 
 #check historyDB file and pick newest one
 historydb_file = glob.glob(os.path.join(history_path,"history*"))
@@ -190,6 +197,7 @@ PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','che
 CHECKSUM_DATA = ['checksum_data']
 TRANS_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
 TRANS = ['T_ID','beg_timestamp','end_timestamp','RPMDB_version','cmdline','loginuid','releasever','return_code']
+GROUPS = ['name','ui_name','is_installed','exclude','full_list','pkg_types','grp_types']
 
 ############################# TABLE INIT ######################################
 
@@ -225,6 +233,10 @@ cursor.execute('''CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description 
 
 #create table PACKAGE_TYPE
 cursor.execute('''CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)''')
+
+#create table GROUPS
+cursor.execute('''CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name text, ui_name text, is_installed integer, exclude text,
+                full_list text, pkg_types integer, grp_types integer)''')
 
 
 ################################ DB CONSTRUCTION ##############################
@@ -398,6 +410,24 @@ for row in h_cursor:
 h_cursor.execute('SELECT * FROM trans_error')
 for row in h_cursor:
     cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
+
+#construction of GROUPS
+if do_groups == 1:
+    with open(groups_path) as groups_file:
+         data = json.load(groups_file)
+         for key in data:
+             if key != 'meta':
+                 record_G = [''] * len(GROUPS)
+                 for value in data[key]:
+                     record_G[GROUPS.index('ui_name')] = key
+                     record_G[GROUPS.index('name')] = value
+                     for row in data[key][value]:
+                         record_G[GROUPS.index('exclude')] = str(data[key][value]['pkg_exclude'])
+                         record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
+                         record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
+                         record_G[GROUPS.index('full_list')] = str(data[key][value]['full_list'])
+                         record_G[GROUPS.index('is_installed')] = 1
+                     cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?,?)',(record_G))
 
 #save changes
 database.commit()
