@@ -413,29 +413,67 @@ for row in h_cursor:
 h_cursor.execute('SELECT * FROM trans_error')
 for row in h_cursor:
     cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
+print('Transforming groups')
 
 #construction of GROUPS
 if do_groups == 1:
     with open(groups_path) as groups_file:
-         data = json.load(groups_file)
-         for key in data:
-             if key != 'meta':
-                 record_G = [''] * len(GROUPS)
-                 for value in data[key]:
-                     record_G[GROUPS.index('ui_name')] = key
-                     record_G[GROUPS.index('name')] = value
-                     for row in data[key][value]:
-                         record_G[GROUPS.index('exclude')] = str(data[key][value]['pkg_exclude'])
-                         record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
-                         record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
-                         record_G[GROUPS.index('full_list')] = str(data[key][value]['full_list'])
-                         record_G[GROUPS.index('is_installed')] = 1
-                     cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?,?)',(record_G))
-
+        data = json.load(groups_file)
+        for key in data:
+            if key != 'meta':
+                record_G = [''] * len(GROUPS)
+                for value in data[key]:
+                    record_G[GROUPS.index('ui_name')] = key
+                    record_G[GROUPS.index('name')] = value
+                    for row in data[key][value]:
+                        record_G[GROUPS.index('exclude')] = str(data[key][value]['pkg_exclude'])
+                        record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
+                        record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
+                        record_G[GROUPS.index('is_installed')] = 1
+                    for package in data[key][value]['full_list']:
+                        if record_G[GROUPS.index('full_list')]:
+                            record_G[GROUPS.index('full_list')]+=';'+package
+                        else:
+                           record_G[GROUPS.index('full_list')]=package
+                    cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?,?)',(record_G))
 #save changes
 database.commit()
 
-#TODO: construction of TRANS_GROUP_DATA - create Bindings
+# construction of TRANS_GROUP_DATA - create Bindings
+# FIXME:Some kind of random factor here
+cursor.execute('SELECT * FROM GROUPS')
+group_list = cursor.fetchall()
+for row in group_list: #for each group entry
+    data = row[5].split(';') #split full list into packages
+    tid_list = []
+    for package in data: #for each package in full list
+        cursor.execute('SELECT P_ID FROM PACKAGE WHERE name=?',(package,)) #find package by name
+        p_ids = cursor.fetchall()
+        if not p_ids:
+            continue
+        for p_id in p_ids: #for all packages of given name
+            cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=?',(p_id[0],)) #find package data by P_ID
+            package = cursor.fetchone()
+            if not package:
+                continue
+            cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE PD_ID=?',(package[0],)) #find all T_IDs for given PD_ID
+            package = cursor.fetchall()
+            if not package:
+                continue
+            for transaction in package:
+                tid_list.append(transaction[0]) #store all transactions
+    tid_unique = sorted(list(set(tid_list))) #get unique list of transactions
+    if len(tid_unique) == 0:
+        cursor.execute('UPDATE GROUPS SET is_installed=? WHERE G_ID=?',(0,row[0])) #no transaction connected with this group
+    else:
+        for transaction in tid_unique:
+            if tid_list.count(transaction) >= len(data):#group packages in transaction vs all group packages
+                #set packages present in transaction as is_installed parameter in TRANS_GROUP_DATA
+                tid_tuple = (transaction,row[0],row[1],row[2],tid_list.count(transaction),row[4],row[5],row[6],row[7])
+                cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?,?,?)',(tid_tuple))
+
+#save changes
+database.commit()
 
 #close connection
 database.close()
