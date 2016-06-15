@@ -93,7 +93,7 @@ bg=gray</panel_attributes>
       <w>180</w>
       <h>170</h>
     </coordinates>
-    <panel_attributes>TRANSACTION_DATA
+    <panel_attributes>TRANS_DATA
 --
 TD_ID
 T_ID
@@ -126,12 +126,12 @@ halign=center
   <element>
     <id>UMLClass</id>
     <coordinates>
-      <x>360</x>
+      <x>380</x>
       <y>0</y>
-      <w>220</w>
+      <w>180</w>
       <h>190</h>
     </coordinates>
-    <panel_attributes>TRANSACTION_GROUP_DATA
+    <panel_attributes>TRANS_GROUP_DATA
 --
 TG_ID
 T_ID
@@ -169,7 +169,7 @@ halign=center
       <w>180</w>
       <h>160</h>
     </coordinates>
-    <panel_attributes>TRANSACTION
+    <panel_attributes>TRANS
 --
 T_ID
 beg_timestamp
@@ -416,7 +416,7 @@ halign=center
       <w>180</w>
       <h>160</h>
     </coordinates>
-    <panel_attributes>GROUP
+    <panel_attributes>GROUPS
 --
 G_ID
 name
@@ -434,14 +434,14 @@ halign=center
   <element>
     <id>Relation</id>
     <coordinates>
-      <x>570</x>
+      <x>550</x>
       <y>40</y>
-      <w>110</w>
+      <w>130</w>
       <h>50</h>
     </coordinates>
     <panel_attributes>m1=*
 
 </panel_attributes>
-    <additional_attributes>90.0;20.0;10.0;20.0</additional_attributes>
+    <additional_attributes>110.0;20.0;10.0;20.0</additional_attributes>
   </element>
 </diagram>
