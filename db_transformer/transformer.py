@@ -15,7 +15,7 @@ def CONSTRUCT_NAME(row):
     return _NAME
 
 def PACKAGE_DATA_INSERT(cursor,data):
-    cursor.execute('INSERT INTO PACKAGE_DATA VALUES (null,?,?,?,?,?,?,?,?,?)', data)
+    cursor.execute('INSERT INTO PACKAGE_DATA VALUES (null,?,?,?,?,?,?,?,?)', data)
 
 def TRANS_DATA_INSERT(cursor,data):
     cursor.execute('INSERT INTO TRANS_DATA VALUES (null,?,?,?,?,?,?,?)', data)
@@ -78,7 +78,7 @@ def BIND_PID_PDID(cursor,pid):
     cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=?',(pid,))
     PPD_ID = cursor.fetchone()
     if PPD_ID == None:
-        cursor.execute('INSERT INTO PACKAGE_DATA VALUES(null,?,?,?,?,?,?,?,?,?)',(pid,'','','','','','','',''))
+        cursor.execute('INSERT INTO PACKAGE_DATA VALUES(null,?,?,?,?,?,?,?,?)',(pid,'','','','','','',''))
         cursor.execute('SELECT last_insert_rowid()')
         PPD_ID = cursor.fetchone()
     return PPD_ID[0]
@@ -191,7 +191,7 @@ database = sqlite3.connect(args.output)
 cursor = database.cursor()
 
 #value distribution in tables
-PACKAGE_DATA = ['P_ID','TD_ID','R_ID','from_repo_revision','from_repo_timestamp',
+PACKAGE_DATA = ['P_ID','R_ID','from_repo_revision','from_repo_timestamp',
                     'installed_by','changed_by','installonly','origin_url']
 PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','checksum_type','type']
 CHECKSUM_DATA = ['checksum_data']
@@ -202,7 +202,7 @@ GROUPS = ['name','ui_name','is_installed','exclude','full_list','pkg_types','grp
 ############################# TABLE INIT ######################################
 
 #create table PACKAGE_DATA
-cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, TD_ID text, R_ID integer,
+cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, R_ID integer,
             from_repo_revision text, from_repo_timestamp text, installed_by text, changed_by text, installonly text, origin_url text)''')
 #create table PACKAGE
 cursor.execute('''CREATE TABLE PACKAGE (P_ID integer, name text, epoch text, version text, release text, arch text,
@@ -329,11 +329,14 @@ state_types = cursor.fetchall()
 fsm_state = 0
 obsoleting_t = 0
 update_t = 0
+downgrade_t = 0
 for a in range(len(state_types)):
     if state_types[a][1] == 'Obsoleting':
         obsoleting_t = a+1
     elif state_types[a][1] == 'Update':
         update_t = a+1
+    elif state_types[a][1] == 'Downgrade':
+        downgrade_t = a+1
 
 #find ORIGINAL_TD_ID for Obsoleting and upgraded - via FSM
 previous_TD_ID = 0
@@ -345,16 +348,12 @@ for row in tmp_row:
             fsm_state = 1
         elif row[7] == update_t:
             fsm_state = 1
+        elif row[7] == downgrade_t:
+            fsm_state = 1
         previous_TD_ID = row[0]
     elif fsm_state == 1:
         cursor.execute('UPDATE TRANS_DATA SET ORIGINAL_TD_ID = ? WHERE TD_ID = ?',(row[0],previous_TD_ID))
         fsm_state = 0
-
-#add TD_ID into PACKAGE_DATA
-cursor.execute('SELECT TD_ID,PD_ID FROM TRANS_DATA')
-tmp_row = cursor.fetchall()
-for row in tmp_row:
-    cursor.execute('UPDATE PACKAGE_DATA SET TD_ID = ? WHERE PD_ID = ?',(row))
 
 #save changes
 database.commit()
@@ -405,7 +404,6 @@ for row in missing:
             t_reason = BIND_REASON(cursor,reason[0])
             cursor.execute('UPDATE TRANS_DATA SET reason=? WHERE TD_ID=?',(t_reason, row[0]))
 
-
 #contruction of OUTPUT
 h_cursor.execute('SELECT * FROM trans_script_stdout')
 for row in h_cursor:
@@ -415,7 +413,7 @@ for row in h_cursor:
     cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
 print('Transforming groups')
 
-#fixme: full list invalid
+#TODO: separate table for packages
 #construction of GROUPS
 if do_groups == 1:
     with open(groups_path) as groups_file:
@@ -424,110 +422,20 @@ if do_groups == 1:
             if key != 'meta':
                 for value in data[key]:
                     record_G = [''] * len(GROUPS)
-                    record_G[GROUPS.index('ui_name')] = key
                     record_G[GROUPS.index('name')] = value
-                    for row in data[key][value]:
-                        record_G[GROUPS.index('exclude')] = str(data[key][value]['pkg_exclude'])
-                        record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
-                        record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
-                        record_G[GROUPS.index('is_installed')] = 1
+                    record_G[GROUPS.index('exclude')] = str(data[key][value]['pkg_exclude'])
+                    record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
+                    record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
+                    record_G[GROUPS.index('is_installed')] = 1
+                    if 'ui_name' in data[key][value]:
+                        record_G[GROUPS.index('ui_name')] = data[key][value]['ui_name']
                     for package in data[key][value]['full_list']:
                         if record_G[GROUPS.index('full_list')]:
                             record_G[GROUPS.index('full_list')]+=';'+package
                         else:
                            record_G[GROUPS.index('full_list')]=package
                     cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?,?)',(record_G))
-#save changes
-database.commit()
-
-# construction of TRANS_GROUP_DATA - create Bindings v2
-cursor.execute('SELECT * FROM GROUPS')
-group_list = cursor.fetchall()
-for row in group_list: #for each group entry
-    if row[2] != 'GROUPS': #skip enviroments
-        continue
-    data = row[5].split(';') #split full list into packages
-    pkg_list = []
-    installed = 1
-    for pkg in data: #for every package in group
-        cursor.execute("SELECT P_ID FROM PACKAGE WHERE name = ?",(pkg,)) #find packages by name
-        p_ids = cursor.fetchall()
-        if not p_ids:
-            installed = 0
-            break
-        found = 0
-        for alternative in p_ids: #more packages of same name
-            cursor.execute('SELECT TD_ID FROM PACKAGE_DATA WHERE P_ID=?',(alternative[0],))
-            td_ids = cursor.fetchall()
-            if not td_ids: #no TD_ID for given name
-                continue
-            found = 1
-            for td_id in td_ids:
-                pkg_list.append(td_id[0]) #store found IDs
-        if found == 0: #no TD_IDs found, group not installed
-            installed = 0
-            break
-    if installed != 1: #group not installed
-        cursor.execute('UPDATE GROUPS SET is_installed=? WHERE G_ID=?',(0,row[0])) #update GROUPS table
-        continue
-    group_transaction = []
-    for td_id in pkg_list: #find all T_IDs for current group
-        cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE TD_ID=?',(td_id,)) #find all T_IDs for given TD_ID
-        t_ids = cursor.fetchall()
-        if not t_ids: #no T_IDs for TD_IDs, should not happen
-            continue
-        for t_id in t_ids:
-             group_transaction.append(t_id[0]) #store T_IDs
-    t_ids_unique = set(group_transaction) #get unique list od T_IDs
-    max_t = 0
-    #Transactions which contain all packages
-    for t_id in t_ids_unique:
-        if group_transaction.count(t_id) >= len(data):
-            tid_tuple = (t_id,row[0],row[1],row[2],row[3],row[4],row[5],row[6],row[7])
-            cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?,?,?)',(tid_tuple))
-            max_t+=1
-    #If no transactions are listed, pick one with max packages changed
-    if max_t == 0:
-        for t_id in t_ids_unique: #find transaction with max packages
-            if group_transaction.count(t_id) > group_transaction.count(max_t):
-                max_t = t_id
-        if max_t > 0: #insert TRANS_GROUP_DATA
-            tid_tuple = (max_t,row[0],row[1],row[2],row[3],row[4],row[5],row[6],row[7])
-            cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?,?,?)',(tid_tuple))
-
-
-# construction of TRANS_GROUP_DATA - create Bindings - original version
-#cursor.execute('SELECT * FROM GROUPS')
-#group_list = cursor.fetchall()
-#for row in group_list: #for each group entry
-#    data = row[5].split(';') #split full list into packages
-#    tid_list = []
-#    for package in data: #for each package in full list
-#        cursor.execute('SELECT P_ID FROM PACKAGE WHERE name=?',(package,)) #find package by name
-#        p_ids = cursor.fetchall()
-#        if not p_ids:
-#            continue
-#        for p_id in p_ids: #for all packages of given name
-#            cursor.execute('SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=?',(p_id[0],)) #find package data by P_ID
-#            package = cursor.fetchone()
-#            if not package:
-#                continue
-#            cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE PD_ID=?',(package[0],)) #find all T_IDs for given PD_ID
-#            package = cursor.fetchall()
-#            if not package:
-#                continue
-#            for transaction in package:
-#                tid_list.append(transaction[0]) #store all transactions
-#    tid_unique = set(tid_list) #get unique list of transactions
-#    if len(tid_unique) == 0:
-#        cursor.execute('UPDATE GROUPS SET is_installed=? WHERE G_ID=?',(0,row[0])) #no transaction connected with this group
-#    else:
-#        for transaction in tid_unique:
-#            if tid_list.count(transaction) >= len(data):#group packages in transaction vs all group packages
-#                tid_tuple = (transaction,row[0],row[1],row[2],1,row[4],row[5],row[6],row[7])
-#                cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?,?,?)',(tid_tuple))
-
-
+#TODO: trans group data
 #save changes
 database.commit()
 
