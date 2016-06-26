@@ -63,6 +63,7 @@ def BIND_OUTPUT(cursor,desc):
         OUTPUT_ID = cursor.fetchone()
     return OUTPUT_ID[0]
 
+#package type binding
 def BIND_PACKAGE(cursor,desc):
     cursor.execute('SELECT ID FROM PACKAGE_TYPE WHERE description=?',(desc,))
     PACKAGE_ID = cursor.fetchone()
@@ -72,6 +73,21 @@ def BIND_PACKAGE(cursor,desc):
         PACKAGE_ID = cursor.fetchone()
     return PACKAGE_ID[0]
 
+#groups packages bindings
+def ADD_GROUPS_PACKAGE(cursor,gid,name):
+    cursor.execute('INSERT INTO GROUPS_PACKAGE VALUES(null,?,?)',(gid,name))
+def ADD_GROUPS_EXCLUDE(cursor,gid,name):
+    cursor.execute('INSERT INTO GROUPS_EXCLUDE VALUES(null,?,?)',(gid,name))
+#env exclude
+def ADD_ENV_EXCLUDE(cursor,eid,name):
+    cursor.execute('INSERT INTO ENVIRONMENTS_EXCLUDE VALUES(null,?,?)',(eid,name))
+
+#bind enviroment with groups
+def BIND_ENV_GROUP(cursor,eid,g_name):
+    cursor.execute('SELECT G_ID FROM GROUPS WHERE name=?',(g_name,))
+    tmp_bind_gid = cursor.fetchone()
+    if tmp_bind_gid:
+        cursor.execute('INSERT INTO ENVIRONMENTS_GROUPS VALUES(null,?,?)',(eid,tmp_bind_gid[0]))
 
 #######integrity optimalization######
 def BIND_PID_PDID(cursor,pid):
@@ -99,12 +115,22 @@ def GET_YUMDB_PACKAGES(cursor):
         if name in pkglist:
             record_PD = [None] * len(PACKAGE_DATA)
             path = os.path.join(yumdb_path,pkglist[name])
+            tmp_reason = ''
+            tmp_releasever = ''
+            tmp_cmdline = ''
             for file in os.listdir(path):
                 if file in PACKAGE_DATA:
                     with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index(file)] =  f.read()
                 elif file == "from_repo":
                     #create binding with REPO table
                     with open(os.path.join(path,file)) as f: record_PD[PACKAGE_DATA.index("R_ID")] = BIND_REPO(cursor, f.read())
+                #some additional data
+                elif file == "reason":
+                    with open(os.path.join(path,file)) as f: tmp_reason = BIND_REASON(cursor, f.read())
+                elif file == "releasever":
+                    with open(os.path.join(path,file)) as f: tmp_releasever = f.read()
+                elif file == "command_line":
+                    with open(os.path.join(path,file)) as f: tmp_cmdline = f.read()
             actualPDID = BIND_PID_PDID(cursor,row[0])
             if record_PD[PACKAGE_DATA.index('R_ID')]:
                 cursor.execute('UPDATE PACKAGE_DATA SET R_ID=? WHERE PD_ID=?',(record_PD[PACKAGE_DATA.index('R_ID')],actualPDID))
@@ -126,6 +152,19 @@ def GET_YUMDB_PACKAGES(cursor):
             if record_PD[PACKAGE_DATA.index('origin_url')]:
                 cursor.execute('UPDATE PACKAGE_DATA SET origin_url=? WHERE PD_ID=?',
                 (record_PD[PACKAGE_DATA.index('origin_url')],actualPDID))
+            #other tables
+            if tmp_reason:
+                cursor.execute('UPDATE TRANS_DATA SET reason=? WHERE PD_ID=?',(tmp_reason,actualPDID))
+            if tmp_releasever:
+                cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE PD_ID=?',(actualPDID,))
+                tmp_tid = cursor.fetchone()
+                if tmp_tid:
+                    cursor.execute('UPDATE TRANS SET releasever=? WHERE T_ID=?',(tmp_releasever,tmp_tid[0]))
+            if tmp_cmdline:
+                cursor.execute('SELECT T_ID FROM TRANS_DATA WHERE PD_ID=?',(actualPDID,))
+                tmp_tid = cursor.fetchone()
+                if tmp_tid:
+                    cursor.execute('UPDATE TRANS SET cmdline=? WHERE T_ID=?',(tmp_cmdline,tmp_tid[0]))
 
 ################################ INPUT PARSER #################################
 
@@ -197,7 +236,8 @@ PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','che
 CHECKSUM_DATA = ['checksum_data']
 TRANS_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
 TRANS = ['T_ID','beg_timestamp','end_timestamp','RPMDB_version','cmdline','loginuid','releasever','return_code']
-GROUPS = ['name','ui_name','is_installed','exclude','full_list','pkg_types','grp_types']
+GROUPS = ['name','ui_name','is_installed','pkg_types','grp_types']
+ENVIRONMENTS = ['name','ui_name','pkg_types','grp_types']
 
 ############################# TABLE INIT ######################################
 
@@ -235,14 +275,29 @@ cursor.execute('''CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description 
 cursor.execute('''CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)''')
 
 #create table GROUPS
-cursor.execute('''CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name text, ui_name text, is_installed integer, exclude text,
-                full_list text, pkg_types integer, grp_types integer)''')
+cursor.execute('''CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name text, ui_name text, is_installed integer, pkg_types integer, grp_types integer)''')
 
 #create table TRANS_GROUP_DATA
 cursor.execute('''CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer, G_ID integer, name text, ui_name text,
-                is_installed integer, exclude text, full_list text, pkg_types integer, grp_types integer)''')
+                is_installed integer, pkg_types integer, grp_types integer)''')
 
-################################ DB CONSTRUCTION ##############################
+#create table GROUPS_PACKAGE
+cursor.execute('''CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY, G_ID integer, name text)''')
+
+#create table GROUPS_EXCLUDE
+cursor.execute('''CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY, G_ID integer, name text)''')
+
+#create table ENVIRONMENTS_GROUPS
+cursor.execute('''CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY, E_ID integer, G_ID integer)''')
+
+#create table ENVIRONMENTS
+cursor.execute('''CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name text, ui_name text, pkg_types integer, grp_types integer)''')
+
+#create table ENVIRONMENTS_EXCLUDE
+cursor.execute('''CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY, E_ID integer, name text)''')
+
+
+#----------------------------- DB CONSTRUCTION -------------------------------#
 
 print('Transforming packages')
 
@@ -286,15 +341,12 @@ for row in h_cursor:
 record_PD[PACKAGE_DATA.index('P_ID')] = actualPID
 PACKAGE_DATA_INSERT(cursor,record_PD) #insert last record
 
-#fetch from yumdb
-GET_YUMDB_PACKAGES(cursor)
-
-#########integrity optimalization#########
+#--------integrity optimalization--------#
 cursor.execute('SELECT P_ID FROM PACKAGE')
 tmp_row = cursor.fetchall()
 for row in tmp_row:
     BIND_PID_PDID(cursor,int(row[0]))
-##########################################
+#----------------------------------------#
 
 #save changes
 database.commit()
@@ -378,7 +430,7 @@ for row in h_cursor:
 cursor.execute('SELECT T_ID FROM TRANS WHERE releasever=?',('',))
 missing = cursor.fetchall()
 for row in missing:
-    cursor.execute('SELECT PD_ID FROM TRANS_DATA WHERE T_ID=? LIMIT 10',(row[0],))
+    cursor.execute('SELECT PD_ID FROM TRANS_DATA WHERE T_ID=?',(row[0],))
     PDID = cursor.fetchall()
     if PDID != None:
         for actualPDID in PDID:
@@ -411,31 +463,80 @@ for row in h_cursor:
 h_cursor.execute('SELECT * FROM trans_error')
 for row in h_cursor:
     cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
-print('Transforming groups')
 
-#TODO: separate table for packages
+print("Transforming yumdb")
+#fetch additional data from yumdb
+GET_YUMDB_PACKAGES(cursor)
+
+print('Transforming groups')
 #construction of GROUPS
 if do_groups == 1:
     with open(groups_path) as groups_file:
         data = json.load(groups_file)
         for key in data:
-            if key != 'meta':
+            if key == 'GROUPS':
                 for value in data[key]:
                     record_G = [''] * len(GROUPS)
                     record_G[GROUPS.index('name')] = value
-                    record_G[GROUPS.index('exclude')] = str(data[key][value]['pkg_exclude'])
                     record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
                     record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
                     record_G[GROUPS.index('is_installed')] = 1
                     if 'ui_name' in data[key][value]:
                         record_G[GROUPS.index('ui_name')] = data[key][value]['ui_name']
+                    cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?)',(record_G))
+                    cursor.execute('SELECT last_insert_rowid()')
+                    tmp_gid = cursor.fetchone()[0]
                     for package in data[key][value]['full_list']:
-                        if record_G[GROUPS.index('full_list')]:
-                            record_G[GROUPS.index('full_list')]+=';'+package
-                        else:
-                           record_G[GROUPS.index('full_list')]=package
-                    cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?,?)',(record_G))
-#TODO: trans group data
+                        ADD_GROUPS_PACKAGE(cursor,tmp_gid,package)
+                    for package in data[key][value]['pkg_exclude']:
+                        ADD_GROUPS_EXCLUDE(cursor,tmp_gid,package)
+        for key in data:
+            if key == 'ENVIRONMENTS':
+                for value in data[key]:
+                    record_E = [''] * len(ENVIRONMENTS)
+                    record_E[ENVIRONMENTS.index('name')] = value
+                    record_E[ENVIRONMENTS.index('pkg_types')] = data[key][value]['pkg_types']
+                    record_E[ENVIRONMENTS.index('grp_types')] = data[key][value]['grp_types']
+                    if 'ui_name' in data[key][value]:
+                        record_E[ENVIRONMENTS.index('ui_name')] = data[key][value]['ui_name']
+                    cursor.execute('INSERT INTO ENVIRONMENTS VALUES (null,?,?,?,?)',(record_E))
+                    cursor.execute('SELECT last_insert_rowid()')
+                    tmp_eid = cursor.fetchone()[0]
+                    for package in data[key][value]['full_list']:
+                        BIND_ENV_GROUP(cursor,tmp_eid,package)
+                    for package in data[key][value]['pkg_exclude']:
+                        ADD_ENV_EXCLUDE(cursor,tmp_eid,package)
+
+#NOTE:ui_name necessary for TRANS_DATA
+#construction of TRANS_GROUP_DATA from GROUPS
+cursor.execute('SELECT * FROM GROUPS WHERE ui_name!=?',('',))
+tmp_groups = cursor.fetchall()
+for row in tmp_groups:
+    tmp_ui_name = "%"+row[2]+"%"
+    cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+    tmp_trans = cursor.fetchall()
+    if tmp_trans:
+        for single_trans in tmp_trans:
+            tmp_tuple = (single_trans[0],row[0],row[1],row[2],row[3],row[4],row[5])
+            cursor.execute('INSERT INTO TRANS_DATA VALUES(null,?,?,?,?,?,?,?)',tmp_tuple)
+
+#construction of TRANS_GROUP_DATA from ENVIRONMENTS
+cursor.execute('SELECT * FROM ENVIRONMENTS WHERE ui_name!=?',('',))
+tmp_env = cursor.fetchall()
+for row in tmp_env:
+    tmp_ui_name = "%"+row[2]+"%"
+    cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+    tmp_trans = cursor.fetchall()
+    if tmp_trans:
+        for single_trans in tmp_trans:
+            cursor.execute('SELECT G_ID FROM ENVIRONMENTS_GROUPS WHERE E_ID = ?',(row[0],))
+            tmp_groups = cursor.fetchall()
+            for gid in tmp_groups:
+                cursor.execute('SELECT * FROM GROUPS WHERE G_ID = ?',(gid[0],))
+                tmp_group_data = cursor.fetchone()
+                tmp_tuple = (single_trans[0],tmp_group_data[0],tmp_group_data[1],tmp_group_data[2],tmp_group_data[3],tmp_group_data[4],tmp_group_data[5])
+                cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?)',tmp_tuple)
+
 #save changes
 database.commit()
 
