@@ -83,8 +83,8 @@ def ADD_ENV_EXCLUDE(cursor,eid,name):
     cursor.execute('INSERT INTO ENVIRONMENTS_EXCLUDE VALUES(null,?,?)',(eid,name))
 
 #bind enviroment with groups
-def BIND_ENV_GROUP(cursor,eid,g_name):
-    cursor.execute('SELECT G_ID FROM GROUPS WHERE name=?',(g_name,))
+def BIND_ENV_GROUP(cursor,eid,name_id):
+    cursor.execute('SELECT G_ID FROM GROUPS WHERE name_id=?',(name_id,))
     tmp_bind_gid = cursor.fetchone()
     if tmp_bind_gid:
         cursor.execute('INSERT INTO ENVIRONMENTS_GROUPS VALUES(null,?,?)',(eid,tmp_bind_gid[0]))
@@ -236,8 +236,8 @@ PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','che
 CHECKSUM_DATA = ['checksum_data']
 TRANS_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
 TRANS = ['T_ID','beg_timestamp','end_timestamp','RPMDB_version','cmdline','loginuid','releasever','return_code']
-GROUPS = ['name','ui_name','is_installed','pkg_types','grp_types']
-ENVIRONMENTS = ['name','ui_name','pkg_types','grp_types']
+GROUPS = ['name_id','name','ui_name','is_installed','pkg_types','grp_types']
+ENVIRONMENTS = ['name_id','name','ui_name','pkg_types','grp_types']
 
 ############################# TABLE INIT ######################################
 
@@ -275,10 +275,10 @@ cursor.execute('''CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description 
 cursor.execute('''CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)''')
 
 #create table GROUPS
-cursor.execute('''CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name text, ui_name text, is_installed integer, pkg_types integer, grp_types integer)''')
+cursor.execute('''CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text, ui_name text, is_installed integer, pkg_types integer, grp_types integer)''')
 
 #create table TRANS_GROUP_DATA
-cursor.execute('''CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer, G_ID integer, name text, ui_name text,
+cursor.execute('''CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer, G_ID integer, name_id text, name text, ui_name text,
                 is_installed integer, pkg_types integer, grp_types integer)''')
 
 #create table GROUPS_PACKAGE
@@ -291,7 +291,7 @@ cursor.execute('''CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY, G_ID i
 cursor.execute('''CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY, E_ID integer, G_ID integer)''')
 
 #create table ENVIRONMENTS
-cursor.execute('''CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name text, ui_name text, pkg_types integer, grp_types integer)''')
+cursor.execute('''CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text, name text, ui_name text, pkg_types integer, grp_types integer)''')
 
 #create table ENVIRONMENTS_EXCLUDE
 cursor.execute('''CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY, E_ID integer, name text)''')
@@ -477,13 +477,15 @@ if do_groups == 1:
             if key == 'GROUPS':
                 for value in data[key]:
                     record_G = [''] * len(GROUPS)
-                    record_G[GROUPS.index('name')] = value
+                    record_G[GROUPS.index('name_id')] = value
+                    if 'name' in data[key][value]:
+                        record_G[GROUPS.index('name')] = data[key][value]['name']
                     record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
                     record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
                     record_G[GROUPS.index('is_installed')] = 1
                     if 'ui_name' in data[key][value]:
                         record_G[GROUPS.index('ui_name')] = data[key][value]['ui_name']
-                    cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?)',(record_G))
+                    cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?)',(record_G))
                     cursor.execute('SELECT last_insert_rowid()')
                     tmp_gid = cursor.fetchone()[0]
                     for package in data[key][value]['full_list']:
@@ -494,12 +496,14 @@ if do_groups == 1:
             if key == 'ENVIRONMENTS':
                 for value in data[key]:
                     record_E = [''] * len(ENVIRONMENTS)
-                    record_E[ENVIRONMENTS.index('name')] = value
+                    record_E[GROUPS.index('name_id')] = value
+                    if 'name' in data[key][value]:
+                        record_G[GROUPS.index('name')] = data[key][value]['name']
                     record_E[ENVIRONMENTS.index('pkg_types')] = data[key][value]['pkg_types']
                     record_E[ENVIRONMENTS.index('grp_types')] = data[key][value]['grp_types']
                     if 'ui_name' in data[key][value]:
                         record_E[ENVIRONMENTS.index('ui_name')] = data[key][value]['ui_name']
-                    cursor.execute('INSERT INTO ENVIRONMENTS VALUES (null,?,?,?,?)',(record_E))
+                    cursor.execute('INSERT INTO ENVIRONMENTS VALUES (null,?,?,?,?,?)',(record_E))
                     cursor.execute('SELECT last_insert_rowid()')
                     tmp_eid = cursor.fetchone()[0]
                     for package in data[key][value]['full_list']:
@@ -509,24 +513,38 @@ if do_groups == 1:
 
 #NOTE:ui_name necessary for TRANS_DATA
 #construction of TRANS_GROUP_DATA from GROUPS
-cursor.execute('SELECT * FROM GROUPS WHERE ui_name!=?',('',))
+cursor.execute('SELECT * FROM GROUPS')
 tmp_groups = cursor.fetchall()
 for row in tmp_groups:
-    tmp_ui_name = "%"+row[2]+"%"
-    cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
-    tmp_trans = cursor.fetchall()
+    tmp_ui_name = ''
+    tmp_trans = ''
+    if row[3]:
+        tmp_ui_name = "%"+row[3]+"%"
+        cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+        tmp_trans = cursor.fetchall()
+    if not tmp_trans and row[2]:
+        tmp_ui_name = "%"+row[2]+"%"
+        cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+        tmp_trans = cursor.fetchall()
     if tmp_trans:
         for single_trans in tmp_trans:
-            tmp_tuple = (single_trans[0],row[0],row[1],row[2],row[3],row[4],row[5])
-            cursor.execute('INSERT INTO TRANS_DATA VALUES(null,?,?,?,?,?,?,?)',tmp_tuple)
+            tmp_tuple = (single_trans[0],row[0],row[1],row[2],row[3],row[4],row[5],row[6])
+            cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?,?)',tmp_tuple)
 
 #construction of TRANS_GROUP_DATA from ENVIRONMENTS
 cursor.execute('SELECT * FROM ENVIRONMENTS WHERE ui_name!=?',('',))
 tmp_env = cursor.fetchall()
 for row in tmp_env:
-    tmp_ui_name = "%"+row[2]+"%"
-    cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
-    tmp_trans = cursor.fetchall()
+    tmp_ui_name = ''
+    tmp_trans = ''
+    if row[3]:
+        tmp_ui_name = "%"+row[3]+"%"
+        cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+        tmp_trans = cursor.fetchall()
+    if not tmp_trans and row[2]:
+        tmp_ui_name = "%"+row[2]+"%"
+        cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+        tmp_trans = cursor.fetchall()
     if tmp_trans:
         for single_trans in tmp_trans:
             cursor.execute('SELECT G_ID FROM ENVIRONMENTS_GROUPS WHERE E_ID = ?',(row[0],))
@@ -534,8 +552,9 @@ for row in tmp_env:
             for gid in tmp_groups:
                 cursor.execute('SELECT * FROM GROUPS WHERE G_ID = ?',(gid[0],))
                 tmp_group_data = cursor.fetchone()
-                tmp_tuple = (single_trans[0],tmp_group_data[0],tmp_group_data[1],tmp_group_data[2],tmp_group_data[3],tmp_group_data[4],tmp_group_data[5])
-                cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?)',tmp_tuple)
+                tmp_tuple = (single_trans[0],tmp_group_data[0],tmp_group_data[1],tmp_group_data[2],tmp_group_data[3],
+                    tmp_group_data[4],tmp_group_data[5],tmp_group_data[6])
+                cursor.execute('INSERT INTO TRANS_GROUP_DATA VALUES(null,?,?,?,?,?,?,?,?)',tmp_tuple)
 
 #save changes
 database.commit()
