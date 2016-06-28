@@ -526,6 +526,10 @@ for row in tmp_groups:
         tmp_ui_name = "%"+row[2]+"%"
         cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
         tmp_trans = cursor.fetchall()
+    if not tmp_trans and row[1]:
+        tmp_ui_name = "%"+row[1]+"%"
+        cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+        tmp_trans = cursor.fetchall()
     if tmp_trans:
         for single_trans in tmp_trans:
             tmp_tuple = (single_trans[0],row[0],row[1],row[2],row[3],row[4],row[5],row[6])
@@ -543,6 +547,10 @@ for row in tmp_env:
         tmp_trans = cursor.fetchall()
     if not tmp_trans and row[2]:
         tmp_ui_name = "%"+row[2]+"%"
+        cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
+        tmp_trans = cursor.fetchall()
+    if not tmp_trans and row[1]:
+        tmp_ui_name = "%"+row[1]+"%"
         cursor.execute('SELECT T_ID FROM TRANS WHERE cmdline LIKE ?',(tmp_ui_name,))
         tmp_trans = cursor.fetchall()
     if tmp_trans:
