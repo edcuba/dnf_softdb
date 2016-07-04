@@ -1,5 +1,20 @@
 #!/usr/bin/env python3
-# Eduard Cuba 2016
+# Copyright (C) 2016  Red Hat, Inc.
+# Author: Eduard Cuba <xcubae00@stud.fit.vutbr.cz>
+#
+# This copyrighted material is made available to anyone wishing to use,
+# modify, copy, or redistribute it subject to the terms and conditions of
+# the GNU General Public License v.2, or (at your option) any later version.
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY expressed or implied, including the implied warranties of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+# Public License for more details.  You should have received a copy of the
+# GNU General Public License along with this program; if not, write to the
+# Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.  Any Red Hat trademarks that are incorporated in the
+# source code or documentation are not subject to the GNU General Public
+# License and may only be used or replicated with the express permission of
+# Red Hat, Inc.
 
 import argparse
 import os
@@ -470,46 +485,46 @@ GET_YUMDB_PACKAGES(cursor)
 
 print('Transforming groups')
 #construction of GROUPS
-if do_groups == 1:
-    with open(groups_path) as groups_file:
-        data = json.load(groups_file)
-        for key in data:
-            if key == 'GROUPS':
-                for value in data[key]:
-                    record_G = [''] * len(GROUPS)
-                    record_G[GROUPS.index('name_id')] = value
-                    if 'name' in data[key][value]:
-                        record_G[GROUPS.index('name')] = data[key][value]['name']
-                    record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
-                    record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
-                    record_G[GROUPS.index('is_installed')] = 1
-                    if 'ui_name' in data[key][value]:
-                        record_G[GROUPS.index('ui_name')] = data[key][value]['ui_name']
-                    cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?)',(record_G))
-                    cursor.execute('SELECT last_insert_rowid()')
-                    tmp_gid = cursor.fetchone()[0]
-                    for package in data[key][value]['full_list']:
-                        ADD_GROUPS_PACKAGE(cursor,tmp_gid,package)
-                    for package in data[key][value]['pkg_exclude']:
-                        ADD_GROUPS_EXCLUDE(cursor,tmp_gid,package)
-        for key in data:
-            if key == 'ENVIRONMENTS':
-                for value in data[key]:
-                    record_E = [''] * len(ENVIRONMENTS)
-                    record_E[GROUPS.index('name_id')] = value
-                    if 'name' in data[key][value]:
-                        record_G[GROUPS.index('name')] = data[key][value]['name']
-                    record_E[ENVIRONMENTS.index('pkg_types')] = data[key][value]['pkg_types']
-                    record_E[ENVIRONMENTS.index('grp_types')] = data[key][value]['grp_types']
-                    if 'ui_name' in data[key][value]:
-                        record_E[ENVIRONMENTS.index('ui_name')] = data[key][value]['ui_name']
-                    cursor.execute('INSERT INTO ENVIRONMENTS VALUES (null,?,?,?,?,?)',(record_E))
-                    cursor.execute('SELECT last_insert_rowid()')
-                    tmp_eid = cursor.fetchone()[0]
-                    for package in data[key][value]['full_list']:
-                        BIND_ENV_GROUP(cursor,tmp_eid,package)
-                    for package in data[key][value]['pkg_exclude']:
-                        ADD_ENV_EXCLUDE(cursor,tmp_eid,package)
+
+with open(groups_path) as groups_file:
+    data = json.load(groups_file)
+    for key in data:
+        if key == 'GROUPS':
+            for value in data[key]:
+                record_G = [''] * len(GROUPS)
+                record_G[GROUPS.index('name_id')] = value
+                if 'name' in data[key][value]:
+                    record_G[GROUPS.index('name')] = data[key][value]['name']
+                record_G[GROUPS.index('pkg_types')] = data[key][value]['pkg_types']
+                record_G[GROUPS.index('grp_types')] = data[key][value]['grp_types']
+                record_G[GROUPS.index('is_installed')] = 1
+                if 'ui_name' in data[key][value]:
+                    record_G[GROUPS.index('ui_name')] = data[key][value]['ui_name']
+                cursor.execute('INSERT INTO GROUPS VALUES (null,?,?,?,?,?,?)',(record_G))
+                cursor.execute('SELECT last_insert_rowid()')
+                tmp_gid = cursor.fetchone()[0]
+                for package in data[key][value]['full_list']:
+                    ADD_GROUPS_PACKAGE(cursor,tmp_gid,package)
+                for package in data[key][value]['pkg_exclude']:
+                    ADD_GROUPS_EXCLUDE(cursor,tmp_gid,package)
+    for key in data:
+        if key == 'ENVIRONMENTS':
+            for value in data[key]:
+                record_E = [''] * len(ENVIRONMENTS)
+                record_E[GROUPS.index('name_id')] = value
+                if 'name' in data[key][value]:
+                    record_G[GROUPS.index('name')] = data[key][value]['name']
+                record_E[ENVIRONMENTS.index('pkg_types')] = data[key][value]['pkg_types']
+                record_E[ENVIRONMENTS.index('grp_types')] = data[key][value]['grp_types']
+                if 'ui_name' in data[key][value]:
+                    record_E[ENVIRONMENTS.index('ui_name')] = data[key][value]['ui_name']
+                cursor.execute('INSERT INTO ENVIRONMENTS VALUES (null,?,?,?,?,?)',(record_E))
+                cursor.execute('SELECT last_insert_rowid()')
+                tmp_eid = cursor.fetchone()[0]
+                for package in data[key][value]['full_list']:
+                    BIND_ENV_GROUP(cursor,tmp_eid,package)
+                for package in data[key][value]['pkg_exclude']:
+                    ADD_ENV_EXCLUDE(cursor,tmp_eid,package)
 
 #NOTE:ui_name necessary for TRANS_DATA
 #construction of TRANS_GROUP_DATA from GROUPS
