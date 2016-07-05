@@ -25,6 +25,7 @@
 
 #include <glib-object.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 
 G_BEGIN_DECLS
 
@@ -38,6 +39,7 @@ HifSwdb* hif_swdb_new(void);
 void hif_swdb_finalize(HifSwdb *self);
 gboolean hif_swdb_exist(HifSwdb *self);
 gint hif_swdb_create_db (HifSwdb *self);
+gint hif_swdb_reset_db (HifSwdb *self);
 
 
 G_END_DECLS

@@ -14,6 +14,8 @@ int main()
         printf("%d\n", hif_swdb_create_db (swdb));
     }
 
+  hif_swdb_reset_db(swdb);
+
   hif_swdb_finalize(swdb);
   return 0;
 }
