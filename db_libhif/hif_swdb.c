@@ -25,7 +25,6 @@
 #include <sqlite3.h>
 #include <stdlib.h>
 
-
 typedef struct _HifSwdb HifSwdb;
 
 /* Default structure */
@@ -176,9 +175,10 @@ gint db_exec(sqlite3 *db, gchar *cmd, int (*callback)(void *, int, char **, char
 }
 
 /* insert into groups/env package tables
-* usage:
-* gint rc = _insert_id_name_desc(db, "TABLE", "Xid", "pkg_name");
-*/
+ * Returns: 0 if successfull
+ * usage: rc = _insert_id_name_desc(db, "TABLE", "Xid", "pkg_name");
+ * Requires opened DB
+ */
 gint _insert_id_name_desc (sqlite3 *db, gchar *table, gint id, gchar *name)
 {
     gint rc;
@@ -240,6 +240,7 @@ gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, gchar *name)
     return _insert_id_name_desc (self->db, "GROUPS_EXCLUDE", gid, name);
 }
 
+
 //returns found ID
 gint _bind_callback(void *data, int argc, char **argv, char **colNames)
 {
@@ -262,6 +263,11 @@ gint _bind_callback(void *data, int argc, char **argv, char **colNames)
     return 0;
 }
 
+/* Bind description to id in chosen table
+ * Returns: ID for desctiption (adds new element if description not present)
+ * Usage: _bind_desc_id(db, table, description)
+ * Requires opened DB
+ */
 gint _bind_desc_id(sqlite3 *db, gchar *table, gchar *desc)
 {
     gint rc;
@@ -277,7 +283,7 @@ gint _bind_desc_id(sqlite3 *db, gchar *table, gchar *desc)
         return -2;
     }
 
-    idx = sqlite3_bind_parameter_index(res, "@desc");
+    gint idx = sqlite3_bind_parameter_index(res, "@desc");
     rc += sqlite3_bind_text(res, idx, desc, -1, SQLITE_STATIC);
 
     if (rc) //something went wrong
@@ -290,7 +296,6 @@ gint _bind_desc_id(sqlite3 *db, gchar *table, gchar *desc)
     if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
     {
         gint result = sqlite3_column_int(res, 0);
-        printf("%d: ", result;
         sqlite3_finalize(res);
         return result;
     }
@@ -298,7 +303,7 @@ gint _bind_desc_id(sqlite3 *db, gchar *table, gchar *desc)
     {
         sqlite3_finalize(res);
         gchar *sql_add = g_strjoin(" ","insert into",table,"values (null, @desc)");
-        rc = sqlite3_prepare_v2(db, sql, -1, &res, NULL);
+        rc = sqlite3_prepare_v2(db, sql_add, -1, &res, NULL);
         if(rc != SQLITE_OK)
         {
             fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
@@ -316,48 +321,63 @@ gint _bind_desc_id(sqlite3 *db, gchar *table, gchar *desc)
             sqlite3_finalize(res);
             return -3;
         }
-        gint step = sqlite3_step(res);
+        gint step = sqlite3_step(res); //add desc into table
 
-        if (step != SQLITE_DONE)
+        if (step != SQLITE_DONE) //not added
         {
-            fprintf(stderr, "SQL error: Could not execute statement (insert into %s values(%d,%s)\n",
-            table,id,name);
+            fprintf(stderr, "SQL error: Could not execute statement (insert into %s value %s)\n",
+            table,desc);
             sqlite3_finalize(res);
             return -4;
         }
 
-        if ( step == SQLITE_ROW )
+        if ( step == SQLITE_ROW ) //added
         {
             gint result = sqlite3_column_int(res, 0);
-            printf("%d: ", result;
             sqlite3_finalize(res);
             return result;
         }
-        else
+        else //some problem
         {
             sqlite3_finalize(res);
             return -1;
         }
     }
-    sqlite3_finalize(res);
-    return -1;
 }
 
-//returns state id from description
-gint hif_swdb_get_package_type (HifSwdb *self, gchar *state)
+gint hif_swdb_get_package_type (HifSwdb *self, gchar *type)
 {
-
-    return 0;
-
+ 	if(hif_swdb_open(self))
+ 		return -1;
+  	return _bind_desc_id(self->db, "PACKAGE_TYPE", type);
 }
 
-//another binders
+gint hif_swdb_get_output_type (HifSwdb *self, gchar *type)
+{
+	if(hif_swdb_open(self))
+ 		return -1;
+  	return _bind_desc_id(self->db, "OUTPUT_TYPE", type);
+}
+
+gint hif_swdb_get_reason_type (HifSwdb *self, gchar *type)
+{
+	if(hif_swdb_open(self))
+ 		return -1;
+  	return _bind_desc_id(self->db, "REASON_TYPE", type);
+}
+
+gint hif_swdb_get_state_type (HifSwdb *self, gchar *type)
+{
+	if(hif_swdb_open(self))
+ 		return -1;
+  	return _bind_desc_id(self->db, "STATE_TYPE", type);
+}
 
 //create db at path
 gint hif_swdb_create_db (HifSwdb *self)
 {
     if (hif_swdb_open(self))
-    return 1;
+    	return 1;
 
     /* Create all tables */
     gint failed = 0;

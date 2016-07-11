@@ -63,8 +63,19 @@ gint hif_swdb_add_group_package (HifSwdb *self, gint gid, gchar *name);
 /* Add package name of group gid into table GROUPS_EXCLUDE */
 gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, gchar *name);
 
-gint hif_sw
+/* Open sqlite db */
+gint hif_swdb_open(HifSwdb *self);
 
+/* Close sqlite db */
+void hif_swdb_close(HifSwdb *self);
+
+gint hif_swdb_get_package_type (HifSwdb *self, gchar *type);
+
+gint hif_swdb_get_output_type (HifSwdb *self, gchar *type);
+
+gint hif_swdb_get_reason_type (HifSwdb *self, gchar *type);
+
+gint hif_swdb_get_state_type (HifSwdb *self, gchar *type);
 
 G_END_DECLS
 
