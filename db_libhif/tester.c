@@ -14,7 +14,8 @@ int main()
         printf("%d\n", hif_swdb_create_db (swdb));
     }
 
-  hif_swdb_reset_db(swdb);
+  //hif_swdb_reset_db(swdb);
+  hif_swdb_add_group_package(swdb, 1, "PACKAGE");
 
   hif_swdb_finalize(swdb);
   return 0;

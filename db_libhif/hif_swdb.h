@@ -33,13 +33,37 @@ G_BEGIN_DECLS
 
 G_DECLARE_FINAL_TYPE (HifSwdb, hif_swdb, HIF,SWDB, GObject) // structure,function prefix,namespace,object name,inherits
 
-const gchar   *hif_swdb_get_path  (HifSwdb *self);
-void  hif_swdb_set_path  (HifSwdb *self, const gchar *path);
+/* returns path to swdb */
+const gchar *hif_swdb_get_path (HifSwdb *self);
+
+/* change path to swdb - actual swdb is closed first */
+void  hif_swdb_set_path (HifSwdb *self, const gchar *path);
+
+/* Constructor */
 HifSwdb* hif_swdb_new(void);
+
+/* Destructor */
 void hif_swdb_finalize(HifSwdb *self);
+
+/* True when swdb exist */
 gboolean hif_swdb_exist(HifSwdb *self);
+
+/* Create new swdb */
 gint hif_swdb_create_db (HifSwdb *self);
+
+/* Remove old and create new */
 gint hif_swdb_reset_db (HifSwdb *self);
+
+/* Bind description with id in table PACKAGE_TYPE */
+gint hif_swdb_get_package_type (HifSwdb *self, gchar *state);
+
+/* Add package name of group gid into table GROUPS_PACKAGE */
+gint hif_swdb_add_group_package (HifSwdb *self, gint gid, gchar *name);
+
+/* Add package name of group gid into table GROUPS_EXCLUDE */
+gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, gchar *name);
+
+gint hif_sw
 
 
 G_END_DECLS

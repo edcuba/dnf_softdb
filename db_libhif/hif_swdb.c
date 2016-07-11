@@ -23,15 +23,18 @@
 #include "hif_swdb.h"
 #include <stdio.h>
 #include <sqlite3.h>
+#include <stdlib.h>
+
 
 typedef struct _HifSwdb HifSwdb;
 
 /* Default structure */
 struct _HifSwdb
 {
-    GObject parent_instance;
-    gchar   *path;
-    sqlite3 *db;
+  GObject parent_instance;
+  gchar   *path;
+  sqlite3 *db;
+  gint ready;
 };
 
 G_DEFINE_TYPE (HifSwdb, hif_swdb, G_TYPE_OBJECT)
@@ -91,6 +94,32 @@ static void
 hif_swdb_init(HifSwdb *self)
 {
   self->path = g_strdup("/var/lib/dnf/swdb.sqlite");
+  self->ready = 0;
+}
+
+//open database at self->path
+gint hif_swdb_open(HifSwdb *self)
+{
+  if(self->ready)
+    return 0;
+
+  if( sqlite3_open(hif_swdb_get_path (self), &self->db))
+    {
+      fprintf(stderr, "ERROR: %s (try again as root)\n", sqlite3_errmsg(self->db));
+      return 1;
+    }
+
+  self->ready = 1;
+  return 0;
+}
+
+void hif_swdb_close(HifSwdb *self)
+{
+  if(self->ready)
+    {
+      sqlite3_close(self->db);
+      self->ready = 0;
+    }
 }
 
 // Constructor
@@ -118,6 +147,7 @@ void  hif_swdb_set_path   (HifSwdb *self, const gchar *path)
 {
   if(g_strcmp0(path,self->path) != 0)
   {
+    hif_swdb_close(self);
     g_free(self->path);
     self->path = g_strdup(path);
   }
@@ -129,10 +159,10 @@ gboolean hif_swdb_exist(HifSwdb *self)
   return g_file_test(hif_swdb_get_path (self),G_FILE_TEST_EXISTS);
 }
 
-gint db_exec(sqlite3 *db, gchar *cmd)
+gint db_exec(sqlite3 *db, gchar *cmd, int (*callback)(void *, int, char **, char**))
 {
   gchar *err_msg;
-  gint result = sqlite3_exec(db, cmd, 0, 0, &err_msg);
+  gint result = sqlite3_exec(db, cmd, callback, 0, &err_msg);
   if ( result != SQLITE_OK)
     {
       fprintf(stderr, "SQL error: %s\n", err_msg);
@@ -145,15 +175,112 @@ gint db_exec(sqlite3 *db, gchar *cmd)
     }
 }
 
+/* insert into groups/env package tables
+ * usage:
+ * gint rc = _insert_id_name_desc(db, "TABLE", "Xid", "pkg_name");
+ */
+gint _insert_id_name_desc (sqlite3 *db, gchar *table, gint id, gchar *name)
+{
+  gint rc;
+  gchar *err_msg =0;
+  sqlite3_stmt *res;
+  gchar *sql = g_strjoin(" ","insert into",table,"values (null, @id, @name)");
+  rc = sqlite3_prepare_v2(db, sql, -1, &res, NULL);
+
+  if(rc != SQLITE_OK)
+    {
+      printf("fault\n");
+      fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
+      sqlite3_free(err_msg);
+      sqlite3_finalize(res);
+      return 2;
+    }
+
+  //entity id
+  gint idx = sqlite3_bind_parameter_index(res, "@id");
+  rc+= sqlite3_bind_int(res, idx, id);
+
+  //package name
+  idx = sqlite3_bind_parameter_index(res, "@name");
+  rc += sqlite3_bind_text(res, idx, name, -1, SQLITE_STATIC);
+
+  if (rc) //something went wrong
+    {
+      fprintf(stderr, "SQL error: Could not bind parameters(%s|%d|%s)\n",table,id,name);
+      sqlite3_finalize(res);
+      return 3;
+    }
+
+  if (sqlite3_step(res) != SQLITE_DONE)
+    {
+      fprintf(stderr, "SQL error: Could not execute statement (insert into %s values(%d,%s)\n",
+	      table,id,name);
+      sqlite3_finalize(res);
+      return 4;
+    }
+
+  sqlite3_finalize(res);
+  return 0;
+}
+
+//add new group package
+gint hif_swdb_add_group_package (HifSwdb *self, gint gid, gchar *name)
+{
+  if (hif_swdb_open(self))
+    return 1;
+
+  return _insert_id_name_desc (self->db, "GROUPS_PACKAGE", gid, name);
+}
+
+//add new group exclude
+gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, gchar *name)
+{
+  if (hif_swdb_open(self))
+    return 1;
+
+  return _insert_id_name_desc (self->db, "GROUPS_EXCLUDE", gid, name);
+}
+
+//returns found ID
+gint _bind_callback(void *data, int argc, char **argv, char **colNames)
+{
+  gint *id = (gint *)data;
+  *id = 0;
+
+  char *fault;
+  if(argc > 0)
+    {
+      *id = (gint)strtol(argv[0], &fault, 10);
+    }
+  else
+    {
+      return 1;
+    }
+  if(*fault)
+    {
+      return 2;
+    }
+  return 0;
+}
+
+//returns state id from description
+gint hif_swdb_get_package_type (HifSwdb *self, gchar *state)
+{
+  //db_exec (self->db, "select ID from PACKAGE_TYPE where description="+);
+
+
+
+  return 0;
+
+}
+
+//another binders
+
 //create db at path
 gint hif_swdb_create_db (HifSwdb *self)
 {
-  gint rc = sqlite3_open(hif_swdb_get_path (self), &self->db);
-  if ( rc )
-    {
-      fprintf(stderr, "ERROR: %s (try again as root)\n", sqlite3_errmsg(self->db));
-      return 1;
-    }
+  if (hif_swdb_open(self))
+    return 1;
 
   /* Create all tables */
   gint failed = 0;
@@ -162,59 +289,59 @@ gint hif_swdb_create_db (HifSwdb *self)
   failed += db_exec (self->db, "CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,\
                                 P_ID integer, R_ID integer, from_repo_revision text,\
                                 from_repo_timestamp text, installed_by text, changed_by text,\
-                                installonly text, origin_url text)");
+                                installonly text, origin_url text)", NULL);
   //PACKAGE
   failed += db_exec (self->db, "CREATE TABLE PACKAGE ( P_ID integer, name text, epoch text,\
                                 version text, release text, arch text, checksum_data text,\
-                                checksum_type text, type integer )");
+                                checksum_type text, type integer )", NULL);
   //REPO
   failed += db_exec (self->db, "CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text,\
-                                last_synced text, is_expired text)");
+                                last_synced text, is_expired text)", NULL);
   //TRANS_DATA
   failed += db_exec (self->db, "CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,\
                                 T_ID integer,PD_ID integer, G_ID integer, done INTEGER,\
-                                ORIGINAL_TD_ID integer, reason integer, state integer)");
+                                ORIGINAL_TD_ID integer, reason integer, state integer)", NULL);
   //TRANS
   failed += db_exec (self->db, "CREATE TABLE TRANS (T_ID integer, beg_timestamp text,\
                                 end_timestamp text, RPMDB_version text, cmdline text,\
-                                loginuid integer, releasever text, return_code integer)");
+                                loginuid integer, releasever text, return_code integer)", NULL);
   //OUTPUT
-  failed += db_exec (self->db, "CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)");
+  failed += db_exec (self->db, "CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)", NULL);
 
   //STATE_TYPE
-  failed += db_exec (self->db, "CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)");
+  failed += db_exec (self->db, "CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
   //REASON_TYPE
-  failed += db_exec (self->db, "CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)");
+  failed += db_exec (self->db, "CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
   //OUTPUT_TYPE
-  failed += db_exec (self->db, "CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)");
+  failed += db_exec (self->db, "CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
   //PACKAGE_TYPE
-  failed += db_exec (self->db, "CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)");
+  failed += db_exec (self->db, "CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
   //GROUPS
   failed += db_exec (self->db, "CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text,\
-                                ui_name text, is_installed integer, pkg_types integer, grp_types integer)");
+                                ui_name text, is_installed integer, pkg_types integer, grp_types integer)", NULL);
   //TRANS_GROUP_DATA
   failed += db_exec (self->db, "CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer,\
                                 G_ID integer, name_id text, name text, ui_name text,\
-                                is_installed integer, pkg_types integer, grp_types integer)");
+                                is_installed integer, pkg_types integer, grp_types integer)", NULL);
   //GROUPS_PACKAGE
   failed += db_exec (self->db, "CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY,\
-                                G_ID integer, name text)");
+                                G_ID integer, name text)", NULL);
   //GROUPS_EXCLUDE
   failed += db_exec (self->db, "CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY,\
-                                G_ID integer, name text)");
+                                G_ID integer, name text)", NULL);
   //ENVIRONMENTS_GROUPS
   failed += db_exec (self->db, "CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY,\
-                                E_ID integer, G_ID integer)");
+                                E_ID integer, G_ID integer)", NULL);
   //ENVIRONMENTS
   failed += db_exec (self->db, "CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text,\
-                                name text, ui_name text, pkg_types integer, grp_types integer)");
+                                name text, ui_name text, pkg_types integer, grp_types integer)", NULL);
   //ENVIRONMENTS_EXCLUDE
   failed += db_exec (self->db, "CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,\
-                                E_ID integer, name text)");
+                                E_ID integer, name text)", NULL);
   if (failed != 0)
     {
       fprintf(stderr, "SQL error: Unable to create %d tables\n",failed);
@@ -222,7 +349,7 @@ gint hif_swdb_create_db (HifSwdb *self)
       return 2;
     }
 
-  sqlite3_close(self->db);
+  hif_swdb_close(self);
   return 0;
 }
 
@@ -231,6 +358,7 @@ gint hif_swdb_reset_db (HifSwdb *self)
 {
   if(hif_swdb_exist(self))
     {
+      hif_swdb_close(self);
   	if (g_remove(self->path)!= 0)
 	{
 	  fprintf(stderr,"SWDB error: Could not reset database (try again as root)\n");
@@ -239,4 +367,3 @@ gint hif_swdb_reset_db (HifSwdb *self)
     }
   return hif_swdb_create_db(self);
 }
-
