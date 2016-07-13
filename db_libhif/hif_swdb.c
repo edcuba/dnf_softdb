@@ -20,72 +20,21 @@
 * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+/* TODO:
+ * - Constructor not working
+ */
+
 #include "hif_swdb.h"
 #include <stdio.h>
-#include <sqlite3.h>
 #include <stdlib.h>
 
-typedef struct _HifSwdb HifSwdb;
-
-/* Default structure */
-struct _HifSwdb
-{
-    GObject parent_instance;
-    gchar   *path;
-    sqlite3 *db;
-    gint ready;
-};
-
 G_DEFINE_TYPE (HifSwdb, hif_swdb, G_TYPE_OBJECT)
-
-//property enum
-enum
-{
-    PROP_0,
-    PROP_PATH,
-    LAST_PROP,
-};
-
-//optimalisation
-static GParamSpec *properties[LAST_PROP];
-
-//property operands
-static void
-hif_swdb_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
-{
-    HifSwdb *self = (HifSwdb*)object;
-    switch (prop_id)
-    {
-        case PROP_PATH:
-        g_value_set_string (value, hif_swdb_get_path(self));
-        break;
-    }
-}
-
-static void
-hif_swdb_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec)
-{
-    HifSwdb *self = (HifSwdb*)object;
-    switch (prop_id)
-    {
-        case PROP_PATH:
-        hif_swdb_set_path (self, g_value_get_string(value));
-        break;
-    }
-}
-
 
 // Class initialiser
 static void
 hif_swdb_class_init(HifSwdbClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
-    object_class->get_property = hif_swdb_get_property;
-    object_class->set_property = hif_swdb_set_property;
-
-    properties[PROP_PATH] = g_param_spec_string ( "path", "Path", "Path to swdb", NULL,
-    (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-    g_object_class_install_properties(object_class, LAST_PROP, properties);
 }
 
 // Object initialiser
@@ -121,10 +70,10 @@ void hif_swdb_close(HifSwdb *self)
     }
 }
 
-// Constructor
 HifSwdb* hif_swdb_new(void)
 {
-    return g_object_new(HIF_TYPE_SWDB, 0);
+    HifSwdb *swdb = (HifSwdb *)g_object_new(HIF_TYPE_SWDB, NULL);
+  	return swdb;
 }
 
 // Destructor
@@ -241,28 +190,6 @@ gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, gchar *name)
 }
 
 
-//returns found ID
-gint _bind_callback(void *data, int argc, char **argv, char **colNames)
-{
-    gint *id = (gint *)data;
-    *id = 0;
-
-    char *fault;
-    if(argc > 0)
-    {
-        *id = (gint)strtol(argv[0], &fault, 10);
-    }
-    else
-    {
-        return 1;
-    }
-    if(*fault)
-    {
-        return 2;
-    }
-    return 0;
-}
-
 /* Bind description to id in chosen table
  * Returns: ID for desctiption (adds new element if description not present)
  * Usage: _bind_desc_id(db, table, description)
@@ -345,6 +272,11 @@ gint _bind_desc_id(sqlite3 *db, gchar *table, gchar *desc)
     }
 }
 
+
+/* Binder for PACKAGE_TYPE
+ * Returns: ID of description in PACKAGE_TYPE table
+ * Usage: hif_swdb_get_package_type( HifSwdb, description)
+ */
 gint hif_swdb_get_package_type (HifSwdb *self, gchar *type)
 {
  	if(hif_swdb_open(self))
@@ -352,6 +284,10 @@ gint hif_swdb_get_package_type (HifSwdb *self, gchar *type)
   	return _bind_desc_id(self->db, "PACKAGE_TYPE", type);
 }
 
+/* OUTPUT_TYPE binder
+ * Returns: ID of description in OUTPUT_TYPE table
+ * Usage: hif_swdb_get_output_type( HifSwdb, description)
+ */
 gint hif_swdb_get_output_type (HifSwdb *self, gchar *type)
 {
 	if(hif_swdb_open(self))
@@ -359,6 +295,10 @@ gint hif_swdb_get_output_type (HifSwdb *self, gchar *type)
   	return _bind_desc_id(self->db, "OUTPUT_TYPE", type);
 }
 
+/* REASON_TYPE binder
+ * Returns: ID of description in REASON_TYPE table
+ * Usage: hif_swdb_get_reason_type( HifSwdb, description)
+ */
 gint hif_swdb_get_reason_type (HifSwdb *self, gchar *type)
 {
 	if(hif_swdb_open(self))
@@ -366,6 +306,10 @@ gint hif_swdb_get_reason_type (HifSwdb *self, gchar *type)
   	return _bind_desc_id(self->db, "REASON_TYPE", type);
 }
 
+/* STATE_TYPE binder
+ * Returns: ID of description in STATE_TYPE table
+ * Usage: hif_swdb_get_state_type( HifSwdb, description)
+ */
 gint hif_swdb_get_state_type (HifSwdb *self, gchar *type)
 {
 	if(hif_swdb_open(self))
@@ -379,11 +323,11 @@ gint hif_swdb_create_db (HifSwdb *self)
     if (hif_swdb_open(self))
     	return 1;
 
-    /* Create all tables */
+    // Create all tables
     gint failed = 0;
 
     //PACKAGE_DATA
-    failed += db_exec (self->db, "CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,\
+    failed += db_exec (self->db," CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,\
                                     P_ID integer, R_ID integer, from_repo_revision text,\
                                     from_repo_timestamp text, installed_by text, changed_by text,\
                                     installonly text, origin_url text)", NULL);
@@ -399,9 +343,9 @@ gint hif_swdb_create_db (HifSwdb *self)
                                     T_ID integer,PD_ID integer, G_ID integer, done INTEGER,\
                                     ORIGINAL_TD_ID integer, reason integer, state integer)", NULL);
     //TRANS
-    failed += db_exec (self->db, "CREATE TABLE TRANS (T_ID integer, beg_timestamp text,\
-                                    end_timestamp text, RPMDB_version text, cmdline text,\
-                                    loginuid integer, releasever text, return_code integer)", NULL);
+    failed += db_exec (self->db," CREATE TABLE TRANS (T_ID integer, beg_timestamp text, \
+                                    end_timestamp text, RPMDB_version text, cmdline text, \
+                                    loginuid integer, releasever text, return_code integer) ", NULL);
     //OUTPUT
     failed += db_exec (self->db, "CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)", NULL);
 
