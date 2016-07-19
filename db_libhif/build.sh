@@ -7,6 +7,6 @@
 set -e
 gcc -c -o hif_swdb.o -fPIC `pkg-config --cflags glib-2.0 gobject-2.0 sqlite3` hif_swdb.c
 gcc -shared -o libhif_swdb.so hif_swdb.o
-LD_LIBRARY_PATH=. g-ir-scanner `pkg-config --libs --cflags glib-2.0 gobject-2.0 sqlite3` --identifier-prefix=HifSwdb --symbol-prefix=hif_swdb --namespace HIF --nsversion=1.0 --library hif_swdb --warn-all -o HIF-1.0.gir hif_swdb.c hif_swdb.h
-g-ir-compiler HIF-1.0.gir > HIF-1.0.typelib
+LD_LIBRARY_PATH=. g-ir-scanner `pkg-config --libs --cflags glib-2.0 gobject-2.0 sqlite3` --identifier-prefix=Hif --symbol-prefix=hif_swdb --namespace HifSwdb --nsversion=1.0 --library hif_swdb --warn-all -o HifSwdb-1.0.gir hif_swdb.c hif_swdb.h
+g-ir-compiler HifSwdb-1.0.gir > HifSwdb-1.0.typelib
 GI_TYPELIB_PATH=. LD_LIBRARY_PATH=. ipython

@@ -52,10 +52,11 @@ void  hif_swdb_set_path (HifSwdb *self, const gchar *path);
 
 /**
  * hif_swdb_new: (constructor)
+ * @path: string to become the .path field
  *
- * Returns: (transfer full): new #HifSwdb
+ * Returns: (transfer full): new swdb
  */
-HifSwdb* hif_swdb_new(void);
+HifSwdb* hif_swdb_new(gchar *path);
 
 /* Destructor */
 void hif_swdb_finalize(HifSwdb *self);

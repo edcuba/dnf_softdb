@@ -70,11 +70,11 @@ void hif_swdb_close(HifSwdb *self)
     }
 }
 
-HifSwdb* hif_swdb_new(void)
+/*HifSwdb* hif_swdb_new(gchar *path)
 {
     HifSwdb *swdb = (HifSwdb *)g_object_new(HIF_TYPE_SWDB, NULL);
   	return swdb;
-}
+}*/
 
 // Destructor
 void hif_swdb_finalize(HifSwdb *self)
