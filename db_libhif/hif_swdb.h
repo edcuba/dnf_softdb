@@ -31,20 +31,9 @@
 G_BEGIN_DECLS
 
 #define HIF_TYPE_SWDB (hif_swdb_get_type ())
-G_DECLARE_DERIVABLE_TYPE (HifSwdb, hif_swdb, HIF,SWDB, GObject) // structure,function prefix,namespace,object name,inherits
-
-struct _HifSwdbClass
-{
-  GObjectClass parent_class;
-
-  gpointer padding[12];
-};
-
+G_DECLARE_FINAL_TYPE (HifSwdb, hif_swdb, HIF,SWDB, GObject) // structure,function prefix,namespace,object name,inherits
 
 HifSwdb *hif_swdb_new(void);
-
-/* Destructor */
-void hif_swdb_finalize(HifSwdb *self);
 
 /* returns path to swdb */
 const gchar* hif_swdb_get_path (HifSwdb *self);
