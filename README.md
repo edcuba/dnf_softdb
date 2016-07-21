@@ -1,4 +1,4 @@
-# dnf_softdb
+# dnf_swdb
 DNF software database optimalisation
 
 * db_libhif/* - development of module hif-swdb for libhif
