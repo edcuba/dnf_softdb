@@ -70,6 +70,15 @@ gint hif_swdb_get_reason_type (HifSwdb *self, const gchar *type);
 
 gint hif_swdb_get_state_type (HifSwdb *self, const gchar *type);
 
+gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
+				  					const gchar *name,
+				  					const gchar *arch,
+				  					const gchar *epoch,
+				  					const gchar *version,
+				  					const gchar *release,
+				  					const gchar *checksum,
+								  	const gchar *type);
+
 G_END_DECLS
 
 #endif

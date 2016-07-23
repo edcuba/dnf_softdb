@@ -1,4 +1,4 @@
-#include "hif_swdb.c"
+#include "hif-swdb.c"
 #include <stdio.h>
 
 int main()

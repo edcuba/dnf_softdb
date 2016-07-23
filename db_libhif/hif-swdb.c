@@ -21,25 +21,27 @@
 */
 
 /* TODO:
- * - Constructor not working
+ * - GOM implementation?
  */
 
-#include "hif_swdb.h"
+#define default_path "/var/lib/dnf/swdb.sqlite"
+
+#include "hif-swdb.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 struct _HifSwdb
 {
     GObject parent_instance;
-
     gchar   *path;
     sqlite3 *db;
     gboolean ready;
+  	gboolean path_changed;
 };
 
 G_DEFINE_TYPE(HifSwdb, hif_swdb, G_TYPE_OBJECT)
 
-#define default_path "/var/lib/dnf/swdb.sqlite"
+
 
 // Destructor
 static void hif_swdb_finalize(GObject *object)
@@ -62,6 +64,7 @@ hif_swdb_init(HifSwdb *self)
 {
   	self->path = default_path;
 	self->ready = 0;
+  	self->path_changed = 0;
 }
 
 /**
@@ -79,7 +82,7 @@ HifSwdb* hif_swdb_new(void)
 
 /******************************* Functions *************************************/
 
-gint db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **, char**))
+gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **, char**))
 {
     gchar *err_msg;
     gint result = sqlite3_exec(db, cmd, callback, 0, &err_msg);
@@ -93,6 +96,39 @@ gint db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **
     {
         return 0;
     }
+}
+
+/* Insert query into database
+ * @table - TABLE NAME
+ * @argc - argument count
+ * @argv - array of elements
+ * @override_id - leave 0 (override auto id, dangerous!)
+ */
+gint _db_insert(sqlite3 *db, const gchar *table, gint argc, gchar **argv, gint override_id)
+{
+  	//gint rc;
+    //gchar *err_msg =0;
+    //sqlite3_stmt *res;
+   	gchar *sql;
+  	if (override_id != 0)
+	  	sql = g_strjoin(" ","insert into",table,"values (",g_strdup_printf("%i", override_id));
+  	else
+	  	sql = g_strjoin(" ","insert into",table,"values (null");
+  	for(int i = 0; i<argc; ++i)
+	{
+	   if (i == argc-1)
+		{
+		  sql = g_strjoin(",",sql,argv[i],")");
+		}
+	  else
+		{
+		  sql = g_strjoin(",",sql,argv[i]);
+		}
+	}
+  	printf("%s\n",sql);
+  	return 0;
+
+
 }
 
 
@@ -184,6 +220,46 @@ gint hif_swdb_add_environments_exclude (HifSwdb *self, gint eid, const gchar *na
 
 
 /****************************** PACKAGE PERSISTOR ****************************/
+
+gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
+				  					const gchar *name,
+				  					const gchar *arch,
+				  					const gchar *epoch,
+				  					const gchar *version,
+				  					const gchar *release,
+				 					const gchar *checksum,
+								  	const gchar *type)
+{
+  gchar *pkgdata[8];
+  pkgdata[0] = name;
+  pkgdata[1] = epoch;
+  pkgdata[2] = version;
+  pkgdata[3] = release;
+  pkgdata[4] = arch;
+  pkgdata[7] = g_strdup_printf("%i", hif_swdb_get_package_type(self,type));
+  if (checksum)
+	{
+	   gchar **_checksum = g_strsplit (checksum,":",1);
+	   if(_checksum[0])
+		 pkgdata[5] = _checksum[0];
+	   else
+		 pkgdata[5] = "";
+	   if (_checksum[1])
+		 pkgdata[6] = _checksum[1];
+	   else
+		 pkgdata[6] = "";
+
+	   _db_insert(self->db, "PACKAGE", 8, 	pkgdata, 0);
+
+	   g_strfreev (_checksum);
+	}
+  else
+	{
+	  pkgdata[5] = "";
+	  pkgdata[6] = "";
+	  _db_insert(self->db, "PACKAGE", 8, pkgdata, 0);
+	}
+}
 
 
 
@@ -372,12 +448,15 @@ const gchar   *hif_swdb_get_path  (HifSwdb *self)
 //changes path to swdb
 void  hif_swdb_set_path   (HifSwdb *self, const gchar *path)
 {
-
     if(g_strcmp0(path,self->path) != 0)
     {
         hif_swdb_close(self);
-        g_free(self->path);
-        self->path = g_strdup(path);
+	    if (self->path_changed)
+		{
+		  g_free(self->path);
+		}
+	  	self->path_changed = 1;
+		self->path = g_strdup(path);
     }
 }
 
@@ -425,62 +504,62 @@ gint hif_swdb_create_db (HifSwdb *self)
     gint failed = 0;
 
     //PACKAGE_DATA
-    failed += db_exec (self->db," CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,\
-                                    P_ID integer, R_ID integer, from_repo_revision text,\
-                                    from_repo_timestamp text, installed_by text, changed_by text,\
-                                    installonly text, origin_url text)", NULL);
+    failed += _db_exec (self->db," CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"
+                                    "P_ID integer, R_ID integer, from_repo_revision text,"
+                                    "from_repo_timestamp text, installed_by text, changed_by text,"
+                                    "installonly text, origin_url text)", NULL);
     //PACKAGE
-    failed += db_exec (self->db, "CREATE TABLE PACKAGE ( P_ID integer, name text, epoch text,\
-                                    version text, release text, arch text, checksum_data text,\
-                                    checksum_type text, type integer )", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE PACKAGE ( P_ID integer, name text, epoch text,"
+                                    "version text, release text, arch text, checksum_data text,"
+                                    "checksum_type text, type integer )", NULL);
     //REPO
-    failed += db_exec (self->db, "CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text,\
-                                    last_synced text, is_expired text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text,"
+                                    "last_synced text, is_expired text)", NULL);
     //TRANS_DATA
-    failed += db_exec (self->db, "CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,\
-                                    T_ID integer,PD_ID integer, G_ID integer, done INTEGER,\
-                                    ORIGINAL_TD_ID integer, reason integer, state integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,"
+                                    "T_ID integer,PD_ID integer, G_ID integer, done INTEGER,"
+                                    "ORIGINAL_TD_ID integer, reason integer, state integer)", NULL);
     //TRANS
-    failed += db_exec (self->db," CREATE TABLE TRANS (T_ID integer, beg_timestamp text, \
-                                    end_timestamp text, RPMDB_version text, cmdline text, \
-                                    loginuid integer, releasever text, return_code integer) ", NULL);
+    failed += _db_exec (self->db," CREATE TABLE TRANS (T_ID integer, beg_timestamp text,"
+                                    "end_timestamp text, RPMDB_version text, cmdline text,"
+                                    "loginuid integer, releasever text, return_code integer) ", NULL);
     //OUTPUT
-    failed += db_exec (self->db, "CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)", NULL);
 
     //STATE_TYPE
-    failed += db_exec (self->db, "CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
     //REASON_TYPE
-    failed += db_exec (self->db, "CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
     //OUTPUT_TYPE
-    failed += db_exec (self->db, "CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
     //PACKAGE_TYPE
-    failed += db_exec (self->db, "CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
 
     //GROUPS
-    failed += db_exec (self->db, "CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text,\
-                                    ui_name text, is_installed integer, pkg_types integer, grp_types integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text,"
+                                    "ui_name text, is_installed integer, pkg_types integer, grp_types integer)", NULL);
     //TRANS_GROUP_DATA
-    failed += db_exec (self->db, "CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer,\
-                                    G_ID integer, name_id text, name text, ui_name text,\
-                                    is_installed integer, pkg_types integer, grp_types integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer,"
+                                    "G_ID integer, name_id text, name text, ui_name text,"
+                                    "is_installed integer, pkg_types integer, grp_types integer)", NULL);
     //GROUPS_PACKAGE
-    failed += db_exec (self->db, "CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY,\
-                                    G_ID integer, name text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY,"
+                                    "G_ID integer, name text)", NULL);
     //GROUPS_EXCLUDE
-    failed += db_exec (self->db, "CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY,\
-                                    G_ID integer, name text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY,"
+                                    "G_ID integer, name text)", NULL);
     //ENVIRONMENTS_GROUPS
-    failed += db_exec (self->db, "CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY,\
-                                    E_ID integer, G_ID integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY,"
+                                    "E_ID integer, G_ID integer)", NULL);
     //ENVIRONMENTS
-    failed += db_exec (self->db, "CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text,\
-                                    name text, ui_name text, pkg_types integer, grp_types integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text,"
+                                    "name text, ui_name text, pkg_types integer, grp_types integer)", NULL);
     //ENVIRONMENTS_EXCLUDE
-    failed += db_exec (self->db, "CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,\
-                                    E_ID integer, name text)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,"
+                                    "E_ID integer, name text)", NULL);
 
     if (failed != 0)
     {

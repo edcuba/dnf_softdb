@@ -260,7 +260,7 @@ ENVIRONMENTS = ['name_id','name','ui_name','pkg_types','grp_types']
 cursor.execute('''CREATE TABLE PACKAGE_DATA (PD_ID integer PRIMARY KEY, P_ID integer, R_ID integer,
             from_repo_revision text, from_repo_timestamp text, installed_by text, changed_by text, installonly text, origin_url text)''')
 #create table PACKAGE
-cursor.execute('''CREATE TABLE PACKAGE (P_ID integer, name text, epoch text, version text, release text, arch text,
+cursor.execute('''CREATE TABLE PACKAGE (P_ID integer primary key, name text, epoch text, version text, release text, arch text,
             checksum_data text, checksum_type text, type integer )''')
 
 #create table REPO
@@ -271,11 +271,11 @@ cursor.execute('''CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,T_ID intege
             done INTEGER, ORIGINAL_TD_ID integer, reason integer, state integer)''')
 
 #create table TRANS
-cursor.execute('''CREATE TABLE TRANS (T_ID integer, beg_timestamp text, end_timestamp text, RPMDB_version text,
+cursor.execute('''CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text, end_timestamp text, RPMDB_version text,
             cmdline text, loginuid integer, releasever text, return_code integer)''')
 
 #create table OUTPUT
-cursor.execute('''CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)''')
+cursor.execute('''CREATE TABLE OUTPUT (O_ID integer primary key, T_ID INTEGER, msg text, type integer)''')
 
 #create table STATE_TYPE
 cursor.execute('''CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)''')
@@ -474,10 +474,10 @@ for row in missing:
 #contruction of OUTPUT
 h_cursor.execute('SELECT * FROM trans_script_stdout')
 for row in h_cursor:
-    cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stdout')))
+    cursor.execute('INSERT INTO OUTPUT VALUES (null,?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stdout')))
 h_cursor.execute('SELECT * FROM trans_error')
 for row in h_cursor:
-    cursor.execute('INSERT INTO OUTPUT VALUES (?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
+    cursor.execute('INSERT INTO OUTPUT VALUES (null,?,?,?)',(row[1],row[2],BIND_OUTPUT(cursor,'stderr')))
 
 print("Transforming yumdb")
 #fetch additional data from yumdb
