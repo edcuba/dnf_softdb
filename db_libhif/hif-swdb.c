@@ -20,27 +20,44 @@
 * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-/* TODO:
- * - GOM implementation?
- */
-
 #define default_path "/var/lib/dnf/swdb.sqlite"
+
+#define DB_PREP(db, sql, res) assert(_db_prepare(db, sql, &res))
+#define DB_BIND(res, id, source) assert(_db_bind(res, id, source))
+#define DB_BIND_INT(res, id, source) assert(_db_bind_int(res, id, source))
+#define DB_STEP(res) assert(_db_step(res))
+
+#define INSERT_PKG "insert into PACKAGE values(null,@name,@epoch,@version,@release,@arch,@cdata,@ctype,@type)"
 
 #include "hif-swdb.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 struct _HifSwdb
 {
     GObject parent_instance;
     gchar   *path;
     sqlite3 *db;
-    gboolean ready;
-  	gboolean path_changed;
+    gboolean ready; //db opened
+  	gboolean path_changed; //dont forget to free memory...
+  	gboolean running; //if true, db will not be closed
 };
 
 G_DEFINE_TYPE(HifSwdb, hif_swdb, G_TYPE_OBJECT)
 
+/* Table structs */
+struct package_t
+{
+  	const gchar *name;
+  	const gchar *epoch;
+  	const gchar *version;
+  	const gchar *release;
+  	const gchar *arch;
+  	const gchar *checksum_data;
+  	const gchar *checksum_type;
+  	gint type;
+};
 
 
 // Destructor
@@ -65,6 +82,7 @@ hif_swdb_init(HifSwdb *self)
   	self->path = default_path;
 	self->ready = 0;
   	self->path_changed = 0;
+  	self->running = 0;
 }
 
 /**
@@ -82,6 +100,59 @@ HifSwdb* hif_swdb_new(void)
 
 /******************************* Functions *************************************/
 
+gint _db_step(sqlite3_stmt *res)
+{
+  	if (sqlite3_step(res) != SQLITE_DONE)
+    {
+        fprintf(stderr, "SQL error: Could not execute statement in _db_step()\n");
+        sqlite3_finalize(res);
+        return 0;
+	}
+  	sqlite3_finalize(res);
+  	return 1; //true because of assert
+}
+
+gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
+{
+  	gint rc = sqlite3_prepare_v2(db, sql, -1, res, NULL);
+    if(rc != SQLITE_OK)
+    {
+        fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
+	  	fprintf(stderr, "SQL error: Prepare failed!\n");
+        sqlite3_finalize(*res);
+        return 0;
+    }
+  	return 1; //true because of assert
+}
+
+gint _db_bind(sqlite3_stmt *res, const gchar *id, const gchar *source)
+{
+  	gint idx = sqlite3_bind_parameter_index(res, id);
+    gint rc = sqlite3_bind_text(res, idx, source, -1, SQLITE_STATIC);
+
+  	if (rc) //something went wrong
+    {
+        fprintf(stderr, "SQL error: Could not bind parameters(%d|%s|%s)\n",idx,id,source);
+        sqlite3_finalize(res);
+        return 0;
+    }
+  	return 1; //true because of assert
+}
+
+gint _db_bind_int(sqlite3_stmt *res, const gchar *id, gint source)
+{
+  	gint idx = sqlite3_bind_parameter_index(res, id);
+    gint rc = sqlite3_bind_int(res, idx, source);
+
+  	if (rc) //something went wrong
+    {
+        fprintf(stderr, "SQL error: Could not bind parameters(%s|%d)\n",id,source);
+        sqlite3_finalize(res);
+        return 0;
+    }
+  	return 1; //true because of assert
+}
+
 gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **, char**))
 {
     gchar *err_msg;
@@ -98,37 +169,29 @@ gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char *
     }
 }
 
-/* Insert query into database
- * @table - TABLE NAME
- * @argc - argument count
- * @argv - array of elements
- * @override_id - leave 0 (override auto id, dangerous!)
- */
-gint _db_insert(sqlite3 *db, const gchar *table, gint argc, gchar **argv, gint override_id)
+/**
+ * _package_insert: (skip)
+ * Insert package into database
+ * @db - database
+ * @package - package meta struct
+ **/
+gint _package_insert(sqlite3 *db, struct package_t *package)
 {
-  	//gint rc;
-    //gchar *err_msg =0;
-    //sqlite3_stmt *res;
-   	gchar *sql;
-  	if (override_id != 0)
-	  	sql = g_strjoin(" ","insert into",table,"values (",g_strdup_printf("%i", override_id));
-  	else
-	  	sql = g_strjoin(" ","insert into",table,"values (null");
-  	for(int i = 0; i<argc; ++i)
-	{
-	   if (i == argc-1)
-		{
-		  sql = g_strjoin(",",sql,argv[i],")");
-		}
-	  else
-		{
-		  sql = g_strjoin(",",sql,argv[i]);
-		}
-	}
-  	printf("%s\n",sql);
+  	gint rc;
+    gchar *err_msg =0;
+    sqlite3_stmt *res;
+   	const gchar *sql = INSERT_PKG;
+	DB_PREP(db,sql,res);
+  	DB_BIND(res, "@name", package->name);
+  	DB_BIND(res, "@epoch", package->epoch);
+  	DB_BIND(res, "@version", package->version);
+  	DB_BIND(res, "@release", package->release);
+  	DB_BIND(res, "@arch", package->arch);
+  	DB_BIND(res, "@cdata", package->checksum_data);
+  	DB_BIND(res, "@ctype", package->checksum_type);
+  	DB_BIND_INT(res, "@type", package->type);
+	DB_STEP(res);
   	return 0;
-
-
 }
 
 
@@ -142,44 +205,18 @@ gint _db_insert(sqlite3 *db, const gchar *table, gint argc, gchar **argv, gint o
 gint _insert_id_name (sqlite3 *db, const gchar *table, gint id, const gchar *name)
 {
     gint rc;
-    gchar *err_msg =0;
     sqlite3_stmt *res;
     gchar *sql = g_strjoin(" ","insert into",table,"values (null, @id, @name)");
-    rc = sqlite3_prepare_v2(db, sql, -1, &res, NULL);
 
-    if(rc != SQLITE_OK)
-    {
-        fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
-        sqlite3_free(err_msg);
-        sqlite3_finalize(res);
-        return 2;
-    }
+    DB_PREP(db,sql,res);
 
     //entity id
-    gint idx = sqlite3_bind_parameter_index(res, "@id");
-    rc+= sqlite3_bind_int(res, idx, id);
+	DB_BIND_INT(res, "@id", id);
 
     //package name
-    idx = sqlite3_bind_parameter_index(res, "@name");
-    rc += sqlite3_bind_text(res, idx, name, -1, SQLITE_STATIC);
+    DB_BIND(res, "@name", name);
 
-    if (rc) //something went wrong
-    {
-        fprintf(stderr, "SQL error: Could not bind parameters(%s|%d|%s)\n",table,id,name);
-        sqlite3_finalize(res);
-        return 3;
-    }
-
-    if (sqlite3_step(res) != SQLITE_DONE)
-    {
-        fprintf(stderr, "SQL error: Could not execute statement (insert into %s values(%d,%s)\n",
-        table,id,name);
-        sqlite3_finalize(res);
-        return 4;
-    }
-
-    sqlite3_finalize(res);
-    return 0;
+    DB_STEP(res);
 }
 
 //add new group package
@@ -227,38 +264,22 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
 				  					const gchar *epoch,
 				  					const gchar *version,
 				  					const gchar *release,
-				 					const gchar *checksum,
+				 					const gchar *checksum_data,
+								   	const gchar *checksum_type,
 								  	const gchar *type)
 {
-  gchar *pkgdata[8];
-  pkgdata[0] = name;
-  pkgdata[1] = epoch;
-  pkgdata[2] = version;
-  pkgdata[3] = release;
-  pkgdata[4] = arch;
-  pkgdata[7] = g_strdup_printf("%i", hif_swdb_get_package_type(self,type));
-  if (checksum)
-	{
-	   gchar **_checksum = g_strsplit (checksum,":",1);
-	   if(_checksum[0])
-		 pkgdata[5] = _checksum[0];
-	   else
-		 pkgdata[5] = "";
-	   if (_checksum[1])
-		 pkgdata[6] = _checksum[1];
-	   else
-		 pkgdata[6] = "";
+  	if (hif_swdb_open(self))
+    	return 1;
+  	self->running = 1;
 
-	   _db_insert(self->db, "PACKAGE", 8, 	pkgdata, 0);
+  	//transform data into nevra format
+ 	struct package_t package = {name, epoch, version, release, arch, checksum_data, checksum_type, 0};
 
-	   g_strfreev (_checksum);
-	}
-  else
-	{
-	  pkgdata[5] = "";
-	  pkgdata[6] = "";
-	  _db_insert(self->db, "PACKAGE", 8, pkgdata, 0);
-	}
+  	package.type = hif_swdb_get_package_type(self,type); //resolve type
+  	gint rc = _package_insert(self->db, &package);
+  	self->running = 0;
+  	hif_swdb_close(self);
+  	return rc;
 }
 
 
@@ -275,26 +296,10 @@ gint _find_match_by_desc(sqlite3 *db, const gchar *table, const gchar *desc)
   	gint rc;
     gchar *err_msg = 0;
     sqlite3_stmt *res;
-    gchar *sql = g_strjoin(" ","select ID from",table,"where description=@desc");
-    rc = sqlite3_prepare_v2(db, sql, -1, &res, NULL);
-    if(rc != SQLITE_OK)
-    {
-        fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
-        sqlite3_free(err_msg);
-        sqlite3_finalize(res);
-        return -2;
-    }
+    const gchar *sql = g_strjoin(" ","select ID from",table,"where description=@desc");
 
-    gint idx = sqlite3_bind_parameter_index(res, "@desc");
-    rc += sqlite3_bind_text(res, idx, desc, -1, SQLITE_STATIC);
-
-    if (rc) //something went wrong
-    {
-        fprintf(stderr, "SQL error: Could not bind parameters(%s|%s)\n",table,desc);
-        sqlite3_finalize(res);
-        return -3;
-    }
-
+    DB_PREP(db,sql,res);
+    DB_BIND(res, "@desc", desc);
     if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
     {
         gint result = sqlite3_column_int(res, 0);
@@ -317,39 +322,11 @@ gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
   	gint rc;
     gchar *err_msg = 0;
     sqlite3_stmt *res;
-    gchar *sql_add = g_strjoin(" ","insert into",table,"values (null, @desc)");
-    rc = sqlite3_prepare_v2(db, sql_add, -1, &res, NULL);
-    if(rc != SQLITE_OK)
-    {
-    	fprintf(stderr, "SQL error: %s\n", sqlite3_errmsg(db));
-        sqlite3_free(err_msg);
-        sqlite3_finalize(res);
-        return -2;
-    }
+    gchar *sql = g_strjoin(" ","insert into",table,"values (null, @desc)");
 
-    gint idx = sqlite3_bind_parameter_index(res, "@desc");
-    rc += sqlite3_bind_text(res, idx, desc, -1, SQLITE_STATIC);
-
-    if (rc) //something went wrong
-    {
-        fprintf(stderr, "SQL error: Could not bind parameters(%s|%s)\n",table,desc);
-        sqlite3_finalize(res);
-        return -3;
-    }
-    gint step = sqlite3_step(res); //add desc into table
-
-    if (step != SQLITE_DONE) //not added
-    {
-        fprintf(stderr, "SQL error: Could not execute statement (insert into %s value %s)\n",
-        table,desc);
-        sqlite3_finalize(res);
-        return -4;
-    }
-  	else
-	{
-	  sqlite3_finalize(res);
-	  return 0;
-	}
+  	DB_PREP(db, sql, res);
+    DB_BIND(res, "@desc", desc);
+	DB_STEP(res);
 }
 
 /* Bind description to id in chosen table
@@ -432,10 +409,6 @@ gint hif_swdb_get_state_type (HifSwdb *self, const gchar *type)
   	return rc;
 }
 
-
-
-
-
 /******************************* Database operators ************************************/
 
 //returns path to swdb, default is /var/lib/dnf/swdb.sqlite
@@ -485,8 +458,7 @@ gint hif_swdb_open(HifSwdb *self)
 
 void hif_swdb_close(HifSwdb *self)
 {
-
-    if(self->ready)
+    if( self->ready && !self->running )
     {
         sqlite3_close(self->db);
         self->ready = 0;
@@ -509,7 +481,7 @@ gint hif_swdb_create_db (HifSwdb *self)
                                     "from_repo_timestamp text, installed_by text, changed_by text,"
                                     "installonly text, origin_url text)", NULL);
     //PACKAGE
-    failed += _db_exec (self->db, "CREATE TABLE PACKAGE ( P_ID integer, name text, epoch text,"
+    failed += _db_exec (self->db, "CREATE TABLE PACKAGE ( P_ID integer primary key, name text, epoch text,"
                                     "version text, release text, arch text, checksum_data text,"
                                     "checksum_type text, type integer )", NULL);
     //REPO
@@ -520,11 +492,11 @@ gint hif_swdb_create_db (HifSwdb *self)
                                     "T_ID integer,PD_ID integer, G_ID integer, done INTEGER,"
                                     "ORIGINAL_TD_ID integer, reason integer, state integer)", NULL);
     //TRANS
-    failed += _db_exec (self->db," CREATE TABLE TRANS (T_ID integer, beg_timestamp text,"
+    failed += _db_exec (self->db," CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text,"
                                     "end_timestamp text, RPMDB_version text, cmdline text,"
                                     "loginuid integer, releasever text, return_code integer) ", NULL);
     //OUTPUT
-    failed += _db_exec (self->db, "CREATE TABLE OUTPUT (T_ID INTEGER, msg text, type integer)", NULL);
+    failed += _db_exec (self->db, "CREATE TABLE OUTPUT (O_ID integer primary key,T_ID INTEGER, msg text, type integer)", NULL);
 
     //STATE_TYPE
     failed += _db_exec (self->db, "CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);

@@ -35,7 +35,6 @@ G_DECLARE_FINAL_TYPE (HifSwdb, hif_swdb, HIF,SWDB, GObject) // structure,functio
 
 HifSwdb *hif_swdb_new(void);
 
-/* returns path to swdb */
 const gchar* hif_swdb_get_path (HifSwdb *self);
 
 /* change path to swdb - actual swdb is closed first */
@@ -44,7 +43,6 @@ void  hif_swdb_set_path (HifSwdb *self, const gchar *path);
 /* True when swdb exist */
 gboolean hif_swdb_exist(HifSwdb *self);
 
-/* Create new swdb */
 gint hif_swdb_create_db (HifSwdb *self);
 
 /* Remove old and create new */
@@ -56,10 +54,8 @@ gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, const gchar *name);
 
 gint hif_swdb_add_environments_exclude (HifSwdb *self, gint eid, const gchar *name);
 
-/* Open sqlite db */
 gint hif_swdb_open(HifSwdb *self);
 
-/* Close sqlite db */
 void hif_swdb_close(HifSwdb *self);
 
 gint hif_swdb_get_package_type (HifSwdb *self, const gchar *type);
@@ -76,7 +72,8 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
 				  					const gchar *epoch,
 				  					const gchar *version,
 				  					const gchar *release,
-				  					const gchar *checksum,
+				 					const gchar *checksum_data,
+								   	const gchar *checksum_type,
 								  	const gchar *type);
 
 G_END_DECLS
