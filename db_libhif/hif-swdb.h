@@ -76,6 +76,19 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
 								   	const gchar *checksum_type,
 								  	const gchar *type);
 
+gint 	hif_swdb_log_error 		(	HifSwdb *self,
+						 			const gint tid,
+							  		const gchar *msg);
+
+gint 	hif_swdb_log_output		(	HifSwdb *self,
+						 			const gint tid,
+									const gchar *msg);
+
+gint 	hif_swdb_trans_beg 	(	HifSwdb *self,
+							 	const gchar *timestamp,
+							 	const gchar *rpmdb_version,
+								const gchar *loginuid);
+
 G_END_DECLS
 
 #endif

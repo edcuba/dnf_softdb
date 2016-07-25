@@ -12,4 +12,4 @@ g-ir-compiler Hif-1.0.gir > Hif-1.0.typelib
 export GI_TYPELIB_PATH=`pwd`
 export LD_LIBRARY_PATH=`pwd`
 #python -c "import gi; gi.require_version('Hif', '1.0'); from gi.repository import Hif; swdb = Hif.Swdb(); swdb.set_path('/home/edynox/swdb.sqlite'); print(swdb.get_path()); del swdb"
-python -c "import gi; gi.require_version('Hif', '1.0'); from gi.repository import Hif; swdb = Hif.Swdb(); swdb.set_path('/home/edynox/swdb.sqlite'); swdb.add_package_naevrcht('name','arch','epoch','version','release','checksum_data', 'checksum_type', 'rpm')"
+python -c "import gi; gi.require_version('Hif', '1.0'); from gi.repository import Hif; swdb = Hif.Swdb(); swdb.set_path('/home/edynox/swdb.sqlite'); swdb.log_error(1,'error'); swdb.log_output(8,'output');"

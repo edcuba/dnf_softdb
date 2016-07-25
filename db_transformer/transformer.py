@@ -272,7 +272,7 @@ cursor.execute('''CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,T_ID intege
 
 #create table TRANS
 cursor.execute('''CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text, end_timestamp text, RPMDB_version text,
-            cmdline text, loginuid integer, releasever text, return_code integer)''')
+            cmdline text, loginuid text, releasever text, return_code integer)''')
 
 #create table OUTPUT
 cursor.execute('''CREATE TABLE OUTPUT (O_ID integer primary key, T_ID INTEGER, msg text, type integer)''')

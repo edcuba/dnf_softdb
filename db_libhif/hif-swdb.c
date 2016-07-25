@@ -26,8 +26,12 @@
 #define DB_BIND(res, id, source) assert(_db_bind(res, id, source))
 #define DB_BIND_INT(res, id, source) assert(_db_bind_int(res, id, source))
 #define DB_STEP(res) assert(_db_step(res))
+#define DB_TRANS_BEGIN 	self->running = 1;
+#define DB_TRANS_END	self->running = 0;
 
 #define INSERT_PKG "insert into PACKAGE values(null,@name,@epoch,@version,@release,@arch,@cdata,@ctype,@type)"
+#define INSERT_OUTPUT "insert into OUTPUT values(null,@tid,@msg,@type)"
+#define INSERT_TRANS_BEG "insert into TRANS values(null,@beg_timestamp,null,@rpmdbv,null,@loginuid,null,null)"
 
 #include "hif-swdb.h"
 #include <stdio.h>
@@ -57,6 +61,20 @@ struct package_t
   	const gchar *checksum_data;
   	const gchar *checksum_type;
   	gint type;
+};
+
+struct output_t
+{
+  	const gint tid;
+  	const gchar *msg;
+  	gint type;
+};
+
+struct trans_beg_t
+{
+  	const gchar *beg_timestamp;
+  	const gchar *rpmdb_version;
+  	const gchar *loginuid;
 };
 
 
@@ -169,29 +187,6 @@ static gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int,
     }
 }
 
-/**
- * _package_insert: (skip)
- * Insert package into database
- * @db - database
- * @package - package meta struct
- **/
-static gint _package_insert(sqlite3 *db, struct package_t *package)
-{
-    sqlite3_stmt *res;
-   	const gchar *sql = INSERT_PKG;
-	DB_PREP(db,sql,res);
-  	DB_BIND(res, "@name", package->name);
-  	DB_BIND(res, "@epoch", package->epoch);
-  	DB_BIND(res, "@version", package->version);
-  	DB_BIND(res, "@release", package->release);
-  	DB_BIND(res, "@arch", package->arch);
-  	DB_BIND(res, "@cdata", package->checksum_data);
-  	DB_BIND(res, "@ctype", package->checksum_type);
-  	DB_BIND_INT(res, "@type", package->type);
-	DB_STEP(res);
-  	return 0;
-}
-
 
 /******************************* GROUP PERSISTOR *******************************/
 
@@ -254,7 +249,30 @@ gint hif_swdb_add_environments_exclude (HifSwdb *self, gint eid, const gchar *na
 
 
 
-/****************************** PACKAGE PERSISTOR ****************************/
+/************************** PACKAGE PERSISTOR ********************************/
+
+/**
+ * _package_insert: (skip)
+ * Insert package into database
+ * @db - database
+ * @package - package meta struct
+ **/
+static gint _package_insert(sqlite3 *db, struct package_t *package)
+{
+    sqlite3_stmt *res;
+   	const gchar *sql = INSERT_PKG;
+	DB_PREP(db,sql,res);
+  	DB_BIND(res, "@name", package->name);
+  	DB_BIND(res, "@epoch", package->epoch);
+  	DB_BIND(res, "@version", package->version);
+  	DB_BIND(res, "@release", package->release);
+  	DB_BIND(res, "@arch", package->arch);
+  	DB_BIND(res, "@cdata", package->checksum_data);
+  	DB_BIND(res, "@ctype", package->checksum_type);
+  	DB_BIND_INT(res, "@type", package->type);
+	DB_STEP(res);
+  	return 0;
+}
 
 gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
 				  					const gchar *name,
@@ -268,18 +286,93 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
 {
   	if (hif_swdb_open(self))
     	return 1;
-  	self->running = 1;
+  	DB_TRANS_BEGIN
 
   	//transform data into nevra format
  	struct package_t package = {name, epoch, version, release, arch,
 		checksum_data, checksum_type, hif_swdb_get_package_type(self,type)};
 
   	gint rc = _package_insert(self->db, &package);
-  	self->running = 0;
+  	DB_TRANS_END
   	hif_swdb_close(self);
   	return rc;
 }
 
+/****************************** TRANS PERSISTOR ******************************/
+
+static gint _trans_beg_insert(sqlite3 *db, struct trans_beg_t *trans_beg)
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = INSERT_TRANS_BEG;
+  	DB_PREP(db,sql,res);
+	DB_BIND(res, "@beg_timestamp", trans_beg->beg_timestamp);
+  	DB_BIND(res, "@rpmdbv", trans_beg->rpmdb_version );
+  	DB_BIND(res, "@loginuid", trans_beg->loginuid);
+  	DB_STEP(res);
+  	return 0;
+}
+
+gint 	hif_swdb_trans_beg 	(	HifSwdb *self,
+							 	const gchar *timestamp,
+							 	const gchar *rpmdb_version,
+								const gchar *loginuid)
+{
+	if (hif_swdb_open(self))
+    	return 1;
+  	struct trans_beg_t trans_beg = { timestamp, rpmdb_version, loginuid};
+  	gint rc = _trans_beg_insert(self->db, &trans_beg);
+  	hif_swdb_close(self);
+  	return rc;
+}
+
+
+/****************************** OUTPUT PERSISTOR *****************************/
+
+static gint _output_insert(sqlite3 *db, struct output_t *output)
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = INSERT_OUTPUT;
+  	DB_PREP(db,sql,res);
+  	DB_BIND_INT(res, "@tid", output->tid);
+  	DB_BIND(res, "@msg", output->msg);
+  	DB_BIND_INT(res, "@type", output->type);
+  	DB_STEP(res);
+  	return 0;
+}
+
+gint hif_swdb_log_error	(	HifSwdb *self,
+						 	const gint tid,
+							const gchar *msg)
+{
+  	if (hif_swdb_open(self))
+    	return 1;
+
+  	DB_TRANS_BEGIN
+
+  	struct output_t output = { tid, msg, hif_swdb_get_output_type(self, "stderr") };
+  	gint rc = _output_insert( self->db, &output);
+
+  	DB_TRANS_END
+  	hif_swdb_close(self);
+  	return rc;
+}
+
+gint hif_swdb_log_output	(	HifSwdb *self,
+						 	const gint tid,
+							const gchar *msg)
+{
+  	if (hif_swdb_open(self))
+    	return 1;
+
+  	DB_TRANS_BEGIN
+
+  	struct output_t output = { tid, msg, hif_swdb_get_output_type(self, "stout") };
+  	gint rc = _output_insert( self->db, &output);
+
+  	DB_TRANS_END
+  	hif_swdb_close(self);
+  	return rc;
+}
 
 
 
@@ -487,7 +580,7 @@ gint hif_swdb_create_db (HifSwdb *self)
     //TRANS
     failed += _db_exec (self->db," CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text,"
                                     "end_timestamp text, RPMDB_version text, cmdline text,"
-                                    "loginuid integer, releasever text, return_code integer) ", NULL);
+                                    "loginuid text, releasever text, return_code integer) ", NULL);
     //OUTPUT
     failed += _db_exec (self->db, "CREATE TABLE OUTPUT (O_ID integer primary key,T_ID INTEGER, msg text, type integer)", NULL);
 
