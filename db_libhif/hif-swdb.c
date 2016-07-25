@@ -79,7 +79,7 @@ hif_swdb_class_init(HifSwdbClass *klass)
 static void
 hif_swdb_init(HifSwdb *self)
 {
-  	self->path = default_path;
+  	self->path = (gchar*) default_path;
 	self->ready = 0;
   	self->path_changed = 0;
   	self->running = 0;
@@ -100,7 +100,7 @@ HifSwdb* hif_swdb_new(void)
 
 /******************************* Functions *************************************/
 
-gint _db_step(sqlite3_stmt *res)
+static gint _db_step(sqlite3_stmt *res)
 {
   	if (sqlite3_step(res) != SQLITE_DONE)
     {
@@ -112,7 +112,7 @@ gint _db_step(sqlite3_stmt *res)
   	return 1; //true because of assert
 }
 
-gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
+static gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
 {
   	gint rc = sqlite3_prepare_v2(db, sql, -1, res, NULL);
     if(rc != SQLITE_OK)
@@ -125,7 +125,7 @@ gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
   	return 1; //true because of assert
 }
 
-gint _db_bind(sqlite3_stmt *res, const gchar *id, const gchar *source)
+static gint _db_bind(sqlite3_stmt *res, const gchar *id, const gchar *source)
 {
   	gint idx = sqlite3_bind_parameter_index(res, id);
     gint rc = sqlite3_bind_text(res, idx, source, -1, SQLITE_STATIC);
@@ -139,7 +139,7 @@ gint _db_bind(sqlite3_stmt *res, const gchar *id, const gchar *source)
   	return 1; //true because of assert
 }
 
-gint _db_bind_int(sqlite3_stmt *res, const gchar *id, gint source)
+static gint _db_bind_int(sqlite3_stmt *res, const gchar *id, gint source)
 {
   	gint idx = sqlite3_bind_parameter_index(res, id);
     gint rc = sqlite3_bind_int(res, idx, source);
@@ -153,7 +153,7 @@ gint _db_bind_int(sqlite3_stmt *res, const gchar *id, gint source)
   	return 1; //true because of assert
 }
 
-gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **, char**))
+static gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **, char**))
 {
     gchar *err_msg;
     gint result = sqlite3_exec(db, cmd, callback, 0, &err_msg);
@@ -175,10 +175,8 @@ gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char *
  * @db - database
  * @package - package meta struct
  **/
-gint _package_insert(sqlite3 *db, struct package_t *package)
+static gint _package_insert(sqlite3 *db, struct package_t *package)
 {
-  	gint rc;
-    gchar *err_msg =0;
     sqlite3_stmt *res;
    	const gchar *sql = INSERT_PKG;
 	DB_PREP(db,sql,res);
@@ -202,11 +200,10 @@ gint _package_insert(sqlite3 *db, struct package_t *package)
  * usage: rc = _insert_id_name(db, "TABLE", "Xid", "pkg_name");
  * Requires opened DB
  */
-gint _insert_id_name (sqlite3 *db, const gchar *table, gint id, const gchar *name)
+static gint _insert_id_name (sqlite3 *db, const gchar *table, gint id, const gchar *name)
 {
-    gint rc;
     sqlite3_stmt *res;
-    gchar *sql = g_strjoin(" ","insert into",table,"values (null, @id, @name)");
+    gchar *sql = g_strjoin(" ","insert into",table,"values (null, @id, @name)", NULL);
 
     DB_PREP(db,sql,res);
 
@@ -217,6 +214,7 @@ gint _insert_id_name (sqlite3 *db, const gchar *table, gint id, const gchar *nam
     DB_BIND(res, "@name", name);
 
     DB_STEP(res);
+  	return 0;
 }
 
 //add new group package
@@ -273,9 +271,9 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
   	self->running = 1;
 
   	//transform data into nevra format
- 	struct package_t package = {name, epoch, version, release, arch, checksum_data, checksum_type, 0};
+ 	struct package_t package = {name, epoch, version, release, arch,
+		checksum_data, checksum_type, hif_swdb_get_package_type(self,type)};
 
-  	package.type = hif_swdb_get_package_type(self,type); //resolve type
   	gint rc = _package_insert(self->db, &package);
   	self->running = 0;
   	hif_swdb_close(self);
@@ -291,12 +289,10 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
  * Returns ID for description or 0 if not found
  * Requires opened DB
  */
-gint _find_match_by_desc(sqlite3 *db, const gchar *table, const gchar *desc)
+static gint _find_match_by_desc(sqlite3 *db, const gchar *table, const gchar *desc)
 {
-  	gint rc;
-    gchar *err_msg = 0;
     sqlite3_stmt *res;
-    const gchar *sql = g_strjoin(" ","select ID from",table,"where description=@desc");
+    const gchar *sql = g_strjoin(" ","select ID from",table,"where description=@desc", NULL);
 
     DB_PREP(db,sql,res);
     DB_BIND(res, "@desc", desc);
@@ -317,16 +313,15 @@ gint _find_match_by_desc(sqlite3 *db, const gchar *table, const gchar *desc)
  * Returns 0 if successfull
  * Requires opened DB
  */
-gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
+static gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
 {
-  	gint rc;
-    gchar *err_msg = 0;
     sqlite3_stmt *res;
-    gchar *sql = g_strjoin(" ","insert into",table,"values (null, @desc)");
+    gchar *sql = g_strjoin(" ","insert into",table,"values (null, @desc)", NULL);
 
   	DB_PREP(db, sql, res);
     DB_BIND(res, "@desc", desc);
 	DB_STEP(res);
+  	return 0;
 }
 
 /* Bind description to id in chosen table
@@ -334,7 +329,7 @@ gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
  * Usage: _bind_desc_id(db, table, description)
  * Requires opened DB
  */
-gint _bind_desc_id(sqlite3 *db, const gchar *table, const gchar *desc)
+static gint _bind_desc_id(sqlite3 *db, const gchar *table, const gchar *desc)
 {
     gint id = _find_match_by_desc(db,table,desc);
   	if(id) //found or error
@@ -373,7 +368,6 @@ gint hif_swdb_get_package_type (HifSwdb *self, const gchar *type)
  */
 gint hif_swdb_get_output_type (HifSwdb *self, const gchar *type)
 {
-
 	if(hif_swdb_open(self))
  		return -1;
   	gint rc = _bind_desc_id(self->db, "OUTPUT_TYPE", type);
@@ -414,7 +408,6 @@ gint hif_swdb_get_state_type (HifSwdb *self, const gchar *type)
 //returns path to swdb, default is /var/lib/dnf/swdb.sqlite
 const gchar   *hif_swdb_get_path  (HifSwdb *self)
 {
-
     return self->path;
 }
 

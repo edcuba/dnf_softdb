@@ -5,7 +5,7 @@
 # Source: http://blog-vpodzime.rhcloud.com/?p=33#id3
 # Eduard Cuba 2016
 set -e
-gcc -c -o hif-swdb.o -fPIC `pkg-config --cflags --libs gobject-2.0 sqlite3` hif-swdb.c
+gcc -c -Wmissing-declarations -Wreturn-type -Wunused-variable -Wdiscarded-qualifiers -o hif-swdb.o -fPIC `pkg-config --cflags --libs gobject-2.0 sqlite3` hif-swdb.c
 gcc -shared -o libhif-swdb.so hif-swdb.o `pkg-config --libs gobject-2.0 sqlite3`
 LD_LIBRARY_PATH=. g-ir-scanner --no-libtool `pkg-config --libs --cflags gobject-introspection-1.0 gobject-2.0` --include=GObject-2.0 --identifier-prefix=Hif --symbol-prefix=hif_ --namespace Hif --nsversion=1.0 --library hif-swdb --warn-all -o Hif-1.0.gir hif-swdb.c hif-swdb.h
 g-ir-compiler Hif-1.0.gir > Hif-1.0.typelib
