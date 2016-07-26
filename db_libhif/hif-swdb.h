@@ -87,7 +87,23 @@ gint 	hif_swdb_log_output		(	HifSwdb *self,
 gint 	hif_swdb_trans_beg 	(	HifSwdb *self,
 							 	const gchar *timestamp,
 							 	const gchar *rpmdb_version,
-								const gchar *loginuid);
+								const gchar *cmdline,
+								const gchar *loginuid,
+								const gchar *releasever);
+
+gint 	hif_swdb_trans_end 	(	HifSwdb *self,
+							 	const gint tid,
+							 	const gchar *end_timestamp,
+								const gint return_code);
+
+gint 	hif_swdb_log_package_data(const gint   pid,
+                                  const gchar *from_repo,
+                                  const gchar *from_repo_revision,
+                                  const gchar *from_repo_timestamp,
+                                  const gchar *installed_by,
+                                  const gchar *changed_by,
+                                  const gchar *instalonly,
+                                  const gchar *origin_url );
 
 G_END_DECLS
 

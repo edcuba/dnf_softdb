@@ -31,7 +31,10 @@
 
 #define INSERT_PKG "insert into PACKAGE values(null,@name,@epoch,@version,@release,@arch,@cdata,@ctype,@type)"
 #define INSERT_OUTPUT "insert into OUTPUT values(null,@tid,@msg,@type)"
-#define INSERT_TRANS_BEG "insert into TRANS values(null,@beg_timestamp,null,@rpmdbv,null,@loginuid,null,null)"
+#define INSERT_TRANS_BEG "insert into TRANS values(null,@beg,null,@rpmdbv,@cmdline,@loginuid,@releasever,null)"
+#define INSERT_TRANS_END "UPDATE TRANS SET end_timestamp=@end,return_code=@rc WHERE T_ID=@tid"
+
+#define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
 
 #include "hif-swdb.h"
 #include <stdio.h>
@@ -74,9 +77,29 @@ struct trans_beg_t
 {
   	const gchar *beg_timestamp;
   	const gchar *rpmdb_version;
+  	const gchar *cmdline;
   	const gchar *loginuid;
+  	const gchar *releasever;
 };
 
+struct trans_end_t
+{
+  	const gint tid;
+   	const gchar *end_timestamp;
+  	const gint return_code;
+};
+
+struct package_data_t
+{
+  	const gint   pid;
+    const gchar *from_repo;
+    const gchar *from_repo_revision;
+  	const gchar *from_repo_timestamp;
+  	const gchar *installed_by;
+  	const gchar *changed_by;
+  	const gchar *instalonly;
+  	const gchar *origin_url;
+};
 
 // Destructor
 static void hif_swdb_finalize(GObject *object)
@@ -129,6 +152,7 @@ static gint _db_step(sqlite3_stmt *res)
   	sqlite3_finalize(res);
   	return 1; //true because of assert
 }
+
 
 static gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
 {
@@ -247,9 +271,31 @@ gint hif_swdb_add_environments_exclude (HifSwdb *self, gint eid, const gchar *na
   	return rc;
 }
 
+/***************************** REPO PERSISTOR ********************************/
+
+static gint _bind_repo_by_name (sqlite3 *db, const gchar *name)
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = FIND_REPO_BY_NAME;
+	DB_PREP(db,sql,res);
+  	DB_BIND(res, "@name", name);
+  	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
+    {
+        gint result = sqlite3_column_int(res, 0);
+        sqlite3_finalize(res);
+        return result;
+    }
+  	else
+	{
+	  sqlite3_finalize(res);
+	  return 0;
+	} //TODO: put this into macro and finish...
+
+}
 
 
-/************************** PACKAGE PERSISTOR ********************************/
+
+/**************************** PACKAGE PERSISTOR ******************************/
 
 /**
  * _package_insert: (skip)
@@ -298,6 +344,19 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
   	return rc;
 }
 
+gint 	hif_swdb_log_package_data(const gint   pid,
+                                  const gchar *from_repo,
+                                  const gchar *from_repo_revision,
+                                  const gchar *from_repo_timestamp,
+                                  const gchar *installed_by,
+                                  const gchar *changed_by,
+                                  const gchar *instalonly,
+                                  const gchar *origin_url )
+{
+  	return 0;
+}
+
+
 /****************************** TRANS PERSISTOR ******************************/
 
 static gint _trans_beg_insert(sqlite3 *db, struct trans_beg_t *trans_beg)
@@ -305,9 +364,11 @@ static gint _trans_beg_insert(sqlite3 *db, struct trans_beg_t *trans_beg)
   	sqlite3_stmt *res;
   	const gchar *sql = INSERT_TRANS_BEG;
   	DB_PREP(db,sql,res);
-	DB_BIND(res, "@beg_timestamp", trans_beg->beg_timestamp);
+	DB_BIND(res, "@beg", trans_beg->beg_timestamp);
   	DB_BIND(res, "@rpmdbv", trans_beg->rpmdb_version );
+  	DB_BIND(res, "@cmdline", trans_beg->cmdline);
   	DB_BIND(res, "@loginuid", trans_beg->loginuid);
+  	DB_BIND(res, "@releasever", trans_beg->releasever);
   	DB_STEP(res);
   	return 0;
 }
@@ -315,12 +376,39 @@ static gint _trans_beg_insert(sqlite3 *db, struct trans_beg_t *trans_beg)
 gint 	hif_swdb_trans_beg 	(	HifSwdb *self,
 							 	const gchar *timestamp,
 							 	const gchar *rpmdb_version,
-								const gchar *loginuid)
+								const gchar *cmdline,
+								const gchar *loginuid,
+								const gchar *releasever)
 {
 	if (hif_swdb_open(self))
     	return 1;
-  	struct trans_beg_t trans_beg = { timestamp, rpmdb_version, loginuid};
+  	struct trans_beg_t trans_beg = { timestamp, rpmdb_version, cmdline, loginuid, releasever};
   	gint rc = _trans_beg_insert(self->db, &trans_beg);
+  	hif_swdb_close(self);
+  	return rc;
+}
+
+static gint _trans_end_insert(sqlite3 *db, struct trans_end_t *trans_end)
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = INSERT_TRANS_END;
+  	DB_PREP(db,sql,res);
+  	DB_BIND_INT(res, "@tid", trans_end->tid );
+	DB_BIND(res, "@end", trans_end->end_timestamp );
+  	DB_BIND_INT(res, "@rc", trans_end->return_code );
+  	DB_STEP(res);
+  	return 0;
+}
+
+gint 	hif_swdb_trans_end 	(	HifSwdb *self,
+							 	const gint tid,
+							 	const gchar *end_timestamp,
+								const gint return_code)
+{
+	if (hif_swdb_open(self))
+    	return 1;
+  	struct trans_end_t trans_end = { tid, end_timestamp, return_code};
+  	gint rc = _trans_end_insert(self->db, &trans_end);
   	hif_swdb_close(self);
   	return rc;
 }
