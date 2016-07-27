@@ -26,6 +26,9 @@
 #define DB_BIND(res, id, source) assert(_db_bind(res, id, source))
 #define DB_BIND_INT(res, id, source) assert(_db_bind_int(res, id, source))
 #define DB_STEP(res) assert(_db_step(res))
+#define DB_FIND(res) _db_find(res)
+
+// Leave DB open when in multi-insert transaction
 #define DB_TRANS_BEGIN 	self->running = 1;
 #define DB_TRANS_END	self->running = 0;
 
@@ -33,8 +36,13 @@
 #define INSERT_OUTPUT "insert into OUTPUT values(null,@tid,@msg,@type)"
 #define INSERT_TRANS_BEG "insert into TRANS values(null,@beg,null,@rpmdbv,@cmdline,@loginuid,@releasever,null)"
 #define INSERT_TRANS_END "UPDATE TRANS SET end_timestamp=@end,return_code=@rc WHERE T_ID=@tid"
+#define INSERT_REPO "insert into REPO values(null,@name,null,null)"
+#define INSERT_PKG_DATA "insert into PACKAGE_DATA values(null,@pid,@rid,@repo_r,@repo_t,@installed_by,@changed_by,@installonly,@origin_url)"
+#define INSERT_TRANS_DATA_BEG "insert into TRANS_DATA values(null,@tid,@pdid,null,@done,null,@reason,@state)"
+#define UPDATE_TRANS_DATA_END "UPDATE TRANS_DATA SET done=@done WHERE T_ID=@tid"
 
 #define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
+#define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
 
 #include "hif-swdb.h"
 #include <stdio.h>
@@ -92,13 +100,21 @@ struct trans_end_t
 struct package_data_t
 {
   	const gint   pid;
-    const gchar *from_repo;
+    const gint   rid;
     const gchar *from_repo_revision;
   	const gchar *from_repo_timestamp;
   	const gchar *installed_by;
   	const gchar *changed_by;
   	const gchar *instalonly;
   	const gchar *origin_url;
+};
+
+struct trans_data_beg_t
+{
+  	const gint 	tid;
+	const gint 	pdid;
+  	const gint 	reason;
+	const gint 	state;
 };
 
 // Destructor
@@ -151,6 +167,22 @@ static gint _db_step(sqlite3_stmt *res)
 	}
   	sqlite3_finalize(res);
   	return 1; //true because of assert
+}
+
+// assumes only one parameter on output e.g "SELECT ID FROM DUMMY WHERE ..."
+static gint _db_find(sqlite3_stmt *res)
+{
+  	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
+    {
+        gint result = sqlite3_column_int(res, 0);
+        sqlite3_finalize(res);
+        return result;
+    }
+  	else
+	{
+	  sqlite3_finalize(res);
+	  return 0;
+	}
 }
 
 
@@ -277,23 +309,22 @@ static gint _bind_repo_by_name (sqlite3 *db, const gchar *name)
 {
   	sqlite3_stmt *res;
   	const gchar *sql = FIND_REPO_BY_NAME;
-	DB_PREP(db,sql,res);
+	DB_PREP(db, sql, res);
   	DB_BIND(res, "@name", name);
-  	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
-    {
-        gint result = sqlite3_column_int(res, 0);
-        sqlite3_finalize(res);
-        return result;
-    }
-  	else
+  	gint rc = DB_FIND(res);
+  	if (rc)
 	{
-	  sqlite3_finalize(res);
-	  return 0;
-	} //TODO: put this into macro and finish...
-
+	  	return rc;
+	}
+  	else //not found, need to insert
+	{
+	  	sql = INSERT_REPO;
+	  	DB_PREP(db, sql, res);
+	  	DB_BIND(res, "@name", name);
+	  	DB_STEP(res);
+	  	return _bind_repo_by_name(db, name);
+	}
 }
-
-
 
 /**************************** PACKAGE PERSISTOR ******************************/
 
@@ -344,16 +375,108 @@ gint hif_swdb_add_package_naevrcht(	HifSwdb *self,
   	return rc;
 }
 
-gint 	hif_swdb_log_package_data(const gint   pid,
-                                  const gchar *from_repo,
-                                  const gchar *from_repo_revision,
-                                  const gchar *from_repo_timestamp,
-                                  const gchar *installed_by,
-                                  const gchar *changed_by,
-                                  const gchar *instalonly,
-                                  const gchar *origin_url )
+static gint _package_data_insert (sqlite3 *db, struct package_data_t *package_data)
 {
+  	sqlite3_stmt *res;
+   	const gchar *sql = INSERT_PKG_DATA;
+	DB_PREP(db,sql,res);
+  	DB_BIND_INT(res, "@pid", package_data->pid);
+  	DB_BIND_INT(res, "@rid", package_data->rid);
+  	DB_BIND(res, "@repo_r", package_data->from_repo_revision);
+  	DB_BIND(res, "@repo_t", package_data->from_repo_timestamp);
+  	DB_BIND(res, "@installed_by", package_data->installed_by);
+  	DB_BIND(res, "@changed_by", package_data->changed_by);
+  	DB_BIND(res, "@installonly", package_data->instalonly);
+  	DB_BIND(res, "@origin_url", package_data->origin_url);
+	DB_STEP(res);
   	return 0;
+}
+
+gint 	hif_swdb_log_package_data(	HifSwdb *self,
+									const gint   pid,
+                                  	const gchar *from_repo,
+                                  	const gchar *from_repo_revision,
+                                  	const gchar *from_repo_timestamp,
+                                  	const gchar *installed_by,
+                                  	const gchar *changed_by,
+                                  	const gchar *instalonly,
+                                  	const gchar *origin_url )
+{
+  	if (hif_swdb_open(self))
+    	return 1;
+
+  	struct package_data_t pacakge_data = { pid, _bind_repo_by_name(self->db, from_repo),
+	  from_repo_revision, from_repo_timestamp, installed_by, changed_by, instalonly, origin_url};
+
+  	gint rc = _package_data_insert(self->db, &pacakge_data);
+
+  	hif_swdb_close(self);
+  	return rc;
+}
+
+static gint _pdid_from_pid (	sqlite3 *db,
+								const gint pid )
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = FIND_PDID_FROM_PID;
+  	DB_PREP(db, sql, res);
+  	DB_BIND_INT(res, "@pid", pid);
+  	return DB_FIND(res);
+}
+
+/*************************** TRANS DATA PERSISTOR ****************************/
+
+static gint _trans_data_beg_insert	(sqlite3 *db, struct trans_data_beg_t *trans_data_beg)
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = INSERT_TRANS_DATA_BEG;
+  	DB_PREP(db, sql, res);
+  	DB_BIND_INT(res, "@tid", trans_data_beg->tid);
+  	DB_BIND_INT(res, "@pdid", trans_data_beg->pdid);
+  	DB_BIND_INT(res, "@done", 0);
+  	DB_BIND_INT(res, "@reason", trans_data_beg->reason);
+  	DB_BIND_INT(res, "@state", trans_data_beg->state);
+  	return DB_FIND(res);
+}
+
+gint 	hif_swdb_trans_data_beg	(	HifSwdb *self,
+									const gint 	 tid,
+									const gint 	 pid,
+									const gchar *reason,
+									const gchar *state )
+{
+  	if (hif_swdb_open(self))
+    	return 1;
+  	DB_TRANS_BEGIN
+
+ 	struct trans_data_beg_t trans_data_beg = {tid, _pdid_from_pid(self->db, pid),
+	  	hif_swdb_get_reason_type(self, reason), hif_swdb_get_state_type(self,state)};
+  	gint rc = _trans_data_beg_insert(self->db, &trans_data_beg);
+  	DB_TRANS_END
+  	hif_swdb_close(self);
+  	return rc;
+}
+
+static gint _trans_data_end_update( sqlite3 *db,
+								    const gint tid)
+{
+  	sqlite3_stmt *res;
+  	const gchar *sql = UPDATE_TRANS_DATA_END;
+  	DB_PREP(db, sql, res);
+  	DB_BIND_INT(res, "@done", 1);
+  	DB_BIND_INT(res, "@tid", tid);
+  	DB_STEP(res);
+  	return 0;
+}
+
+gint 	hif_swdb_trans_data_end	(	HifSwdb *self,
+									const gint tid)
+{
+  	if (hif_swdb_open(self))
+    	return 1;
+  	gint rc = _trans_data_end_update(self->db, tid);
+  	hif_swdb_close(self);
+  	return rc;
 }
 
 
@@ -477,17 +600,7 @@ static gint _find_match_by_desc(sqlite3 *db, const gchar *table, const gchar *de
 
     DB_PREP(db,sql,res);
     DB_BIND(res, "@desc", desc);
-    if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
-    {
-        gint result = sqlite3_column_int(res, 0);
-        sqlite3_finalize(res);
-        return result;
-    }
-  	else
-	{
-	  sqlite3_finalize(res);
-	  return 0;
-	}
+    return DB_FIND(res);
 }
 
 /* Inserts description into @table

@@ -96,14 +96,24 @@ gint 	hif_swdb_trans_end 	(	HifSwdb *self,
 							 	const gchar *end_timestamp,
 								const gint return_code);
 
-gint 	hif_swdb_log_package_data(const gint   pid,
-                                  const gchar *from_repo,
-                                  const gchar *from_repo_revision,
-                                  const gchar *from_repo_timestamp,
-                                  const gchar *installed_by,
-                                  const gchar *changed_by,
-                                  const gchar *instalonly,
-                                  const gchar *origin_url );
+gint 	hif_swdb_log_package_data(	HifSwdb *self,
+									const gint   pid,
+                                  	const gchar *from_repo,
+                                  	const gchar *from_repo_revision,
+                                  	const gchar *from_repo_timestamp,
+                                  	const gchar *installed_by,
+                                  	const gchar *changed_by,
+                                  	const gchar *instalonly,
+                                  	const gchar *origin_url );
+
+gint 	hif_swdb_trans_data_beg(	HifSwdb *self,
+									const gint 	 tid,
+									const gint 	 pid,
+									const gchar *reason,
+									const gchar *state );
+
+gint 	hif_swdb_trans_data_end	(	HifSwdb *self,
+									const gint tid);
 
 G_END_DECLS
 
