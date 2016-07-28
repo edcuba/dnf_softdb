@@ -44,6 +44,57 @@
 #define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
 #define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
 
+#define C_PKG_DATA 		"CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"\
+                    	"P_ID integer, R_ID integer, from_repo_revision text,"\
+                    	"from_repo_timestamp text, installed_by text, changed_by text,"\
+                    	"installonly text, origin_url text)"
+
+#define C_PKG 			"CREATE TABLE PACKAGE ( P_ID integer primary key, name text,"\
+						"epoch text, version text, release text, arch text,"\
+						"checksum_data text, checksum_type text, type integer)"
+
+#define C_REPO			"CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text,"\
+                    	"last_synced text, is_expired text)"
+
+#define C_TRANS_DATA	"CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,"\
+                        "T_ID integer,PD_ID integer, G_ID integer, done INTEGER,"\
+                        "ORIGINAL_TD_ID integer, reason integer, state integer)"
+
+#define C_TRANS 		"CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text,"\
+                        "end_timestamp text, RPMDB_version text, cmdline text,"\
+                        "loginuid text, releasever text, return_code integer)"
+
+#define C_OUTPUT		"CREATE TABLE OUTPUT (O_ID integer primary key,T_ID INTEGER,"\
+						"msg text, type integer)"
+
+
+#define C_STATE_TYPE	"CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)"
+#define C_REASON_TYPE	"CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)"
+#define C_OUTPUT_TYPE	"CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)"
+#define C_PKG_TYPE		"CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)"
+
+#define C_GROUPS		"CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text,"\
+                        "ui_name text, is_installed integer, pkg_types integer, grp_types integer)"
+
+#define C_T_GROUP_DATA	"CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY,"\
+						"T_ID integer, G_ID integer, name_id text, name text, ui_name text,"\
+                        "is_installed integer, pkg_types integer, grp_types integer)"
+
+#define C_GROUPS_PKG	"CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY,"\
+                        "G_ID integer, name text)"
+
+#define C_GROUPS_EX		"CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY,"\
+                        "G_ID integer, name text)"
+
+#define C_ENV_GROUPS	"CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY,"\
+                        "E_ID integer, G_ID integer)"
+
+#define C_ENV			"CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text,"\
+                        "name text, ui_name text, pkg_types integer, grp_types integer)"
+
+#define C_ENV_EX		"CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,"\
+                        "E_ID integer, name text)"
+
 #include "hif-swdb.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,7 +208,7 @@ HifSwdb* hif_swdb_new(void)
 
 /******************************* Functions *************************************/
 
-static gint _db_step(sqlite3_stmt *res)
+static gint _db_step	(sqlite3_stmt *res)
 {
   	if (sqlite3_step(res) != SQLITE_DONE)
     {
@@ -170,7 +221,7 @@ static gint _db_step(sqlite3_stmt *res)
 }
 
 // assumes only one parameter on output e.g "SELECT ID FROM DUMMY WHERE ..."
-static gint _db_find(sqlite3_stmt *res)
+static gint _db_find	(sqlite3_stmt *res)
 {
   	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
     {
@@ -186,7 +237,9 @@ static gint _db_find(sqlite3_stmt *res)
 }
 
 
-static gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
+static gint _db_prepare	(	sqlite3 *db,
+						 	const gchar *sql,
+						   	sqlite3_stmt **res)
 {
   	gint rc = sqlite3_prepare_v2(db, sql, -1, res, NULL);
     if(rc != SQLITE_OK)
@@ -199,7 +252,9 @@ static gint _db_prepare(sqlite3 *db, const gchar *sql, sqlite3_stmt **res)
   	return 1; //true because of assert
 }
 
-static gint _db_bind(sqlite3_stmt *res, const gchar *id, const gchar *source)
+static gint _db_bind	(	sqlite3_stmt *res,
+						 	const gchar *id,
+						 	const gchar *source)
 {
   	gint idx = sqlite3_bind_parameter_index(res, id);
     gint rc = sqlite3_bind_text(res, idx, source, -1, SQLITE_STATIC);
@@ -213,7 +268,9 @@ static gint _db_bind(sqlite3_stmt *res, const gchar *id, const gchar *source)
   	return 1; //true because of assert
 }
 
-static gint _db_bind_int(sqlite3_stmt *res, const gchar *id, gint source)
+static gint _db_bind_int (	sqlite3_stmt *res,
+						  	const gchar *id,
+						  	gint source)
 {
   	gint idx = sqlite3_bind_parameter_index(res, id);
     gint rc = sqlite3_bind_int(res, idx, source);
@@ -227,7 +284,9 @@ static gint _db_bind_int(sqlite3_stmt *res, const gchar *id, gint source)
   	return 1; //true because of assert
 }
 
-static gint _db_exec(sqlite3 *db, const gchar *cmd, int (*callback)(void *, int, char **, char**))
+static gint _db_exec	(sqlite3 *db,
+						 const gchar *cmd,
+						 int (*callback)(void *, int, char **, char**))
 {
     gchar *err_msg;
     gint result = sqlite3_exec(db, cmd, callback, 0, &err_msg);
@@ -761,66 +820,25 @@ gint hif_swdb_create_db (HifSwdb *self)
 
     // Create all tables
     gint failed = 0;
+    failed += _db_exec (self->db, C_PKG_DATA, NULL);
+    failed += _db_exec (self->db, C_PKG, NULL);
+    failed += _db_exec (self->db, C_REPO, NULL);
+    failed += _db_exec (self->db, C_TRANS_DATA, NULL);
+    failed += _db_exec (self->db, C_TRANS, NULL);
+    failed += _db_exec (self->db, C_OUTPUT, NULL);
+    failed += _db_exec (self->db, C_STATE_TYPE, NULL);
+    failed += _db_exec (self->db, C_REASON_TYPE, NULL);
+    failed += _db_exec (self->db, C_OUTPUT_TYPE, NULL);
+    failed += _db_exec (self->db, C_PKG_TYPE, NULL);
+    failed += _db_exec (self->db, C_GROUPS, NULL);
+    failed += _db_exec (self->db, C_T_GROUP_DATA, NULL);
+    failed += _db_exec (self->db, C_GROUPS_PKG, NULL);
+    failed += _db_exec (self->db, C_GROUPS_EX, NULL);
+    failed += _db_exec (self->db, C_ENV_GROUPS, NULL);
+    failed += _db_exec (self->db, C_ENV, NULL);
+    failed += _db_exec (self->db, C_ENV_EX, NULL);
 
-    //PACKAGE_DATA
-    failed += _db_exec (self->db," CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"
-                                    "P_ID integer, R_ID integer, from_repo_revision text,"
-                                    "from_repo_timestamp text, installed_by text, changed_by text,"
-                                    "installonly text, origin_url text)", NULL);
-    //PACKAGE
-    failed += _db_exec (self->db, "CREATE TABLE PACKAGE ( P_ID integer primary key, name text, epoch text,"
-                                    "version text, release text, arch text, checksum_data text,"
-                                    "checksum_type text, type integer )", NULL);
-    //REPO
-    failed += _db_exec (self->db, "CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text,"
-                                    "last_synced text, is_expired text)", NULL);
-    //TRANS_DATA
-    failed += _db_exec (self->db, "CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,"
-                                    "T_ID integer,PD_ID integer, G_ID integer, done INTEGER,"
-                                    "ORIGINAL_TD_ID integer, reason integer, state integer)", NULL);
-    //TRANS
-    failed += _db_exec (self->db," CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text,"
-                                    "end_timestamp text, RPMDB_version text, cmdline text,"
-                                    "loginuid text, releasever text, return_code integer) ", NULL);
-    //OUTPUT
-    failed += _db_exec (self->db, "CREATE TABLE OUTPUT (O_ID integer primary key,T_ID INTEGER, msg text, type integer)", NULL);
-
-    //STATE_TYPE
-    failed += _db_exec (self->db, "CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
-
-    //REASON_TYPE
-    failed += _db_exec (self->db, "CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
-
-    //OUTPUT_TYPE
-    failed += _db_exec (self->db, "CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
-
-    //PACKAGE_TYPE
-    failed += _db_exec (self->db, "CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)", NULL);
-
-    //GROUPS
-    failed += _db_exec (self->db, "CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text,"
-                                    "ui_name text, is_installed integer, pkg_types integer, grp_types integer)", NULL);
-    //TRANS_GROUP_DATA
-    failed += _db_exec (self->db, "CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY, T_ID integer,"
-                                    "G_ID integer, name_id text, name text, ui_name text,"
-                                    "is_installed integer, pkg_types integer, grp_types integer)", NULL);
-    //GROUPS_PACKAGE
-    failed += _db_exec (self->db, "CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY,"
-                                    "G_ID integer, name text)", NULL);
-    //GROUPS_EXCLUDE
-    failed += _db_exec (self->db, "CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY,"
-                                    "G_ID integer, name text)", NULL);
-    //ENVIRONMENTS_GROUPS
-    failed += _db_exec (self->db, "CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY,"
-                                    "E_ID integer, G_ID integer)", NULL);
-    //ENVIRONMENTS
-    failed += _db_exec (self->db, "CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text,"
-                                    "name text, ui_name text, pkg_types integer, grp_types integer)", NULL);
-    //ENVIRONMENTS_EXCLUDE
-    failed += _db_exec (self->db, "CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,"
-                                    "E_ID integer, name text)", NULL);
-
-    if (failed != 0)
+  	if (failed != 0)
     {
         fprintf(stderr, "SQL error: Unable to create %d tables\n",failed);
         sqlite3_close(self->db);
