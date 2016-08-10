@@ -45,7 +45,7 @@
 #define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
 #define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
 #define FIND_TID_FROM_PDID "SELECT T_ID FROM TRANS_DATA WHERE PD_ID=@pdid"
-#define LOAD_OUTPUT "SELECT msg FROM trans_error WHERE tid=@tid and type=@type ORDER BY mid ASC"
+#define LOAD_OUTPUT "SELECT msg FROM OUTPUT WHERE T_ID=@tid and type=@type"
 #define PKG_DATA_ATTR_BY_PID "SELECT @attr FROM PACKAGE_DATA WHERE P_ID=@pid"
 #define TRANS_DATA_ATTR_BY_PDID "SELECT @attr FROM TRANS_DATA WHERE PD_ID=@pdid"
 #define TRANS_ATTR_BY_TID "SELECT @attr FROM TRANS WHERE T_ID=@tid"
@@ -521,8 +521,8 @@ const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
         DB_BIND(res, "@release", release);
         DB_BIND(res, "@arch", arch);
         DB_BIND_INT(res, "@type", _type);
-        DB_BIND(res, "checksum_data", checksum_data);
-        DB_BIND(res, "checksum_type", checksum_type);
+        DB_BIND(res, "@cdata", checksum_data);
+        DB_BIND(res, "@ctype", checksum_type);
         rc = DB_FIND(res);
     }
     else
@@ -638,8 +638,9 @@ const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         DB_PREP(self->db, sql, res);
         DB_BIND(res, "@attr", attribute);
         DB_BIND_INT(res, "@pid", pid);
+        const guchar *rv = DB_FIND_STR(res);
         hif_swdb_close(self);
-        return DB_FIND_STR(res);
+        return rv;
     }
     if (!g_strcmp0(table,"TRANS_DATA"))
     {
@@ -649,8 +650,30 @@ const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         DB_PREP(self->db, sql, res);
         DB_BIND(res, "@attr", attribute);
         DB_BIND_INT(res, "@pdid", pdid);
+        const guchar *rv;
+        if (!g_strcmp0(attribute,"reason"))
+        {
+            const gint rc_id = DB_FIND(res);
+            rv = _look_for_desc(self->db, "REASON_TYPE", rc_id);
+            hif_swdb_close(self);
+            if (!rv)
+                return (guchar*)"Unknown";
+            else
+                return rv;
+        }
+        if (!g_strcmp0(attribute,"state"))
+        {
+            const gint rc_id = DB_FIND(res);
+            rv = _look_for_desc(self->db, "STATE_TYPE", rc_id);
+            hif_swdb_close(self);
+            if (!rv)
+                return (guchar*)"Unknown";
+            else
+                return rv;
+        }
+        rv = DB_FIND_STR(res);
         hif_swdb_close(self);
-        return DB_FIND_STR(res);
+        return rv;
     }
     if (!g_strcmp0(table,"TRANS"))
     {
@@ -661,8 +684,9 @@ const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         DB_PREP(self->db, sql, res);
         DB_BIND(res, "@attr", attribute);
         DB_BIND_INT(res, "@tid", tid);
+        const guchar *rv = DB_FIND_STR(res);
         hif_swdb_close(self);
-        return DB_FIND_STR(res);
+        return rv;
     }
     hif_swdb_close(self);
     return NULL;
@@ -904,6 +928,15 @@ static gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
   	return 0;
 }
 
+static const guchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id)
+{
+    sqlite3_stmt *res;
+    gchar *sql = g_strjoin(" ","select description from",table,"where ID=@id", NULL);
+  	DB_PREP(db, sql, res);
+    DB_BIND_INT(res, "@id", id);
+	return DB_FIND_STR(res);
+}
+
 /* Bind description to id in chosen table
  * Returns: ID of desctiption (adds new element if description not present), <= 0 if error
  * Usage: _bind_desc_id(db, table, description)
@@ -1091,3 +1124,24 @@ gint hif_swdb_reset_db (HifSwdb *self)
     }
     return hif_swdb_create_db(self);
 }
+
+
+
+
+
+/* /**
+* mylib_get_string_list2:
+*
+* Returns: (element-type utf8) (transfer container): list of constants
+*          free the list with g_slist_free when done.
+*/
+/*
+GSList *mylib_get_string_list2 (void)
+{
+    GSList *l = NULL;
+    l = g_slist_append (l, "foo");
+    l = g_slist_append (l, "bar");
+    return l;
+ }
+
+*/

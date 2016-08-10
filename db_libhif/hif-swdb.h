@@ -136,6 +136,8 @@ const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
 											const gchar *type,
 											const gboolean create);
 
+static const guchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id);
+
 G_END_DECLS
 
 #endif
