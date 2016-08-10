@@ -11,13 +11,10 @@ LD_LIBRARY_PATH=. g-ir-scanner --no-libtool `pkg-config --libs --cflags gobject-
 g-ir-compiler Hif-1.0.gir > Hif-1.0.typelib
 #export GI_TYPELIB_PATH=`pwd`
 #export LD_LIBRARY_PATH=`pwd`
-#python -c "import gi; gi.require_version('Hif', '1.0'); from gi.repository import Hif; swdb = Hif.Swdb(); swdb.set_path('/home/edynox/swdb.sqlite'); print(swdb.get_path()); del swdb"
-#python -c "import gi; gi.require_version('Hif', '1.0'); from gi.repository import Hif; swdb = Hif.Swdb(); swdb.set_path('/home/edynox/swdb.sqlite'); swdb.log_error(1,'error'); swdb.log_output(8,'output');"
+#ipython
 cp hif-swdb.c /home/edynox/devel/libhif/libhif/
 cp hif-swdb.h /home/edynox/devel/libhif/libhif/
 cd '/home/edynox/devel/libhif/build/'
 cmake ..
 make
 sudo make install
-
-

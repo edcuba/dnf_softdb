@@ -114,16 +114,21 @@ gint 	hif_swdb_trans_data_beg(	HifSwdb *self,
 
 gint 	hif_swdb_trans_data_end	(	HifSwdb *self,
 									const gint tid);
+									
+gint    hif_swdb_trans_data_pid_end (   HifSwdb *self,
+                                        const gint pid,
+                                        const gint tid,
+                                        const gchar *state);
 
 
 const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
 									const gint pid,
 									const gchar *attribute);
 
-const guchar *hif_swdb_load_error (  HifSwdb *self,
-                                    const gint tid);
-const guchar *hif_swdb_load_output (  HifSwdb *self,
-									const gint tid);
+GSList *hif_swdb_load_error (  	HifSwdb *self,
+                            	const gint tid);
+GSList *hif_swdb_load_output (  HifSwdb *self,
+								const gint tid);
 
 const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
 											const gchar *name,
