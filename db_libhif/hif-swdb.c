@@ -385,6 +385,72 @@ static const gchar *_table_by_attribute(const gchar *attr)
     return NULL; //attr not found
 }
 
+/*********************************** UTILS *************************************/
+
+
+/*
+ * for all patterns:
+ * -   find every match for given pattern in package names - split pattern by '-'
+ * -   find every match in name for split patterns
+ * -   construct all possible combinations from package info
+ * -   compare given pattern with possible combinations
+ */
+
+static GSList *_get_subpatterns(const gchar* pattern)
+{
+    GSList *subpatterns = NULL;
+    subpatterns = g_slist_append (subpatterns, g_strdup(pattern));
+    const gchar * pattern_r = g_utf8_strreverse(pattern, -1);
+    gint delimiters1 = 1;
+    gint delimiters2 = 1;
+    for (int i = 0; pattern[i]; ++i)
+    {
+        if (pattern_r[i] == '-') //there will be substring for each delimiter
+        {
+            delimiters1++;
+            gchar **subs = g_strsplit(pattern_r,"-",delimiters1);
+            subpatterns = g_slist_append (subpatterns, g_utf8_strreverse(subs[g_strv_length (subs)-1],-1));
+        }
+        if (pattern_r[i] == '.') //there will be substring for each delimiter
+        {
+            delimiters2++;
+            gchar **subs = g_strsplit(pattern_r,".",delimiters2);
+            subpatterns = g_slist_append (subpatterns, g_utf8_strreverse(subs[g_strv_length (subs)-1],-1));
+        }
+    }
+    return subpatterns;
+}
+
+
+/**
+* hif_swdb_search:
+* @patterns: (element-type utf8) (transfer container): list of constants
+* Returns: (element-type gint32) (transfer container): list of constants
+*/
+GSList *hif_swdb_search (   HifSwdb *self,
+                            const GSList *patterns,
+                            const gboolean ignore_case)
+{
+    while(patterns)
+    {
+        const gchar *pattern = patterns->data;
+        patterns = patterns->next;
+
+        //split pattern into subpatterns
+        GSList *subpatterns = _get_subpatterns(pattern);
+        while(subpatterns)
+        {
+            const gchar *subpattern = subpatterns->data;
+            subpatterns = subpatterns->next;
+            //TODO: find most exact subpattern
+        }
+
+    }
+    GSList *tids = NULL;
+    gint32 a = 1;
+    tids = g_slist_append (tids, GINT_TO_POINTER(a));
+    return tids;
+}
 
 /******************************* GROUP PERSISTOR *******************************/
 
@@ -746,7 +812,6 @@ gint 	hif_swdb_trans_data_beg	(	HifSwdb *self,
     const gint pdid = _pdid_from_pid(self->db, pid);
  	struct trans_data_beg_t trans_data_beg = {tid, pdid,
 	  	hif_swdb_get_reason_type(self, reason), hif_swdb_get_state_type(self,state)};
-    printf("P_ID:%d|PD_ID:%d\n",pid, pdid);
   	gint rc = _trans_data_beg_insert(self->db, &trans_data_beg);
   	DB_TRANS_END
   	hif_swdb_close(self);

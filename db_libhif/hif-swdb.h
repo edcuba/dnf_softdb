@@ -114,7 +114,7 @@ gint 	hif_swdb_trans_data_beg(	HifSwdb *self,
 
 gint 	hif_swdb_trans_data_end	(	HifSwdb *self,
 									const gint tid);
-									
+
 gint    hif_swdb_trans_data_pid_end (   HifSwdb *self,
                                         const gint pid,
                                         const gint tid,
@@ -142,6 +142,10 @@ const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
 											const gboolean create);
 
 static const guchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id);
+
+GSList *hif_swdb_search (   HifSwdb *self,
+							const GSList *patterns,
+							const gboolean ignore_case);
 
 G_END_DECLS
 
