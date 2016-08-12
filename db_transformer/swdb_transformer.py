@@ -32,6 +32,9 @@ def CONSTRUCT_NAME(row):
 def PACKAGE_DATA_INSERT(cursor,data):
     cursor.execute('INSERT INTO PACKAGE_DATA VALUES (null,?,?,?,?,?,?,?,?)', data)
 
+def RPM_DATA_INSERT(cursor,data):
+    cursor.execute('INSERT INTO RPM_DATA VALUES (null,?,?,?,?,?,?,?,?,?,?,?)', data)
+
 def TRANS_DATA_INSERT(cursor,data):
     cursor.execute('INSERT INTO TRANS_DATA VALUES (null,?,?,?,?,?,?,?)', data)
 
@@ -253,6 +256,7 @@ TRANS_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
 TRANS = ['T_ID','beg_timestamp','end_timestamp','RPMDB_version','cmdline','loginuid','releasever','return_code']
 GROUPS = ['name_id','name','ui_name','is_installed','pkg_types','grp_types']
 ENVIRONMENTS = ['name_id','name','ui_name','pkg_types','grp_types']
+RPM_DATA = ["P_ID","buildtime","buildhost","license","packager","size","sourcerpm","url","vendor","committer","committime"]
 
 ############################# TABLE INIT ######################################
 
@@ -311,6 +315,10 @@ cursor.execute('''CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id t
 #create table ENVIRONMENTS_EXCLUDE
 cursor.execute('''CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY, E_ID integer, name text)''')
 
+#create table RPM_DATA
+cursor.execute('''CREATE TABLE RPM_DATA (RPM_ID INTEGER PRIMARY KEY, P_ID INTEGER, buildtime TEXT, buildhost TEXT, license TEXT, packager TEXT, size TEXT,
+    sourcerpm TEXT, url TEXT, vendor TEXT, committer TEXT, committime TEXT)''')
+
 
 #----------------------------- DB CONSTRUCTION -------------------------------#
 
@@ -362,6 +370,27 @@ tmp_row = cursor.fetchall()
 for row in tmp_row:
     BIND_PID_PDID(cursor,int(row[0]))
 #----------------------------------------#
+
+#save changes
+database.commit()
+
+#construction of RPM_DATA according to pkg_rpmdb
+actualPID = 0
+record_RPM = [''] * len(RPM_DATA)
+h_cursor.execute('SELECT * FROM pkg_rpmdb')
+#for each row in pkg_rpmdb
+for row in h_cursor:
+    newPID = row[0]
+    if actualPID != newPID:
+        if actualPID != 0:
+            record_RPM[RPM_DATA.index('P_ID')] = actualPID
+            RPM_DATA_INSERT(cursor,record_RPM) #insert new record into PACKAGE_DATA
+        actualPID = newPID
+        record_RPM = [''] * len(RPM_DATA)
+    if row[1] in RPM_DATA:
+        record_RPM[RPM_DATA.index(row[1])] = row[2] #collect data for record from pkg_yumdb
+record_RPM[RPM_DATA.index('P_ID')] = actualPID
+RPM_DATA_INSERT(cursor,record_RPM) #insert last record
 
 #save changes
 database.commit()

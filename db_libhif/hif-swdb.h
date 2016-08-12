@@ -144,8 +144,16 @@ const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
 static const guchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id);
 
 GSList *hif_swdb_search (   HifSwdb *self,
-							const GSList *patterns,
-							const gboolean ignore_case);
+							const GSList *patterns);
+
+
+static gint _pdid_from_pid (	sqlite3 *db,
+								const gint pid );
+static GSList * _all_pdid_for_pid (	sqlite3 *db,
+									const gint pid );
+
+static gint _tid_from_pdid (	sqlite3 *db,
+								const gint pdid );
 
 G_END_DECLS
 

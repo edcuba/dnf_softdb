@@ -624,11 +624,12 @@ m2=*
       <x>230</x>
       <y>570</y>
       <w>180</w>
-      <h>210</h>
+      <h>220</h>
     </coordinates>
     <panel_attributes>RPM_DATA
 --
 RPM_ID
+P_ID
 buildtime
 buildhost
 license

@@ -27,6 +27,7 @@
 #define DB_BIND_INT(res, id, source) assert(_db_bind_int(res, id, source))
 #define DB_STEP(res) assert(_db_step(res))
 #define DB_FIND(res) _db_find(res)
+#define DB_FIND_MULTI(res) _db_find_multi(res)
 #define DB_FIND_STR(res) _db_find_str(res)
 #define DB_FIND_STR_MULTI(res) _db_find_str_multi(res)
 
@@ -49,7 +50,9 @@
 #define UPDATE_TRANS_DATA_PID_END "UPDATE TRANS_DATA SET done=@done WHERE T_ID=@tid and PD_ID=@pdid and state=@state"
 
 #define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
-#define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
+#define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid ORDER by PD_ID DESC"
+#define FIND_ALL_PDID_FOR_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
+
 #define INSERT_PDID "insert into PACKAGE_DATA values(null,@pid,null,null,null,null,null,null,null)"
 #define FIND_TID_FROM_PDID "SELECT T_ID FROM TRANS_DATA WHERE PD_ID=@pdid"
 #define LOAD_OUTPUT "SELECT msg FROM OUTPUT WHERE T_ID=@tid and type=@type"
@@ -62,6 +65,18 @@
 #define FIND_PKG_BY_NEVRACHT "SELECT P_ID FROM PACKAGE WHERE name=@name and epoch=@epoch and version=@version and release=@release"\
                             " and arch=@arch and @type=type and checksum_data=@cdata and checksum_type=@ctype"
 
+#define FIND_PIDS_BY_NAME "SELECT P_ID FROM PACKAGE WHERE NAME LIKE @pattern"
+
+#define SIMPLE_SEARCH "SELECT P_ID FROM PACKAGE WHERE name LIKE @pat"
+#define SEARCH_PATTERN "SELECT P_ID,name,epoch,version,release,arch,"\
+  "name || '.' || arch AS sql_nameArch,"\
+  "name || '-' || version || '-' || release || '.' || arch AS sql_nameVerRelArch,"\
+  "name || '-' || version AS sql_nameVer,"\
+  "name || '-' || version || '-' || release AS sql_nameVerRel,"\
+  "epoch || ':' || name || '-' || version || '-' || release || '-' || arch AS sql_envra,"\
+  "name || '-' || epoch || '-' || version || '-' || release || '-' || arch AS sql_nevra "\
+  "FROM PACKAGE WHERE name LIKE @sub AND (sql_nameArch LIKE @pat OR sql_nameVerRelArch LIKE @pat OR sql_nameVer LIKE @pat OR"\
+  " sql_nameVerRel LIKE @pat OR sql_nevra LIKE @pat OR sql_envra LIKE @pat)"
 
 #define C_PKG_DATA 		"CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"\
                     	"P_ID integer, R_ID integer, from_repo_revision text,"\
@@ -113,6 +128,9 @@
 
 #define C_ENV_EX		"CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,"\
                         "E_ID integer, name text)"
+#define C_RPM_DATA      "CREATE TABLE RPM_DATA (RPM_ID INTEGER PRIMARY KEY, P_ID INTEGER,"\
+                        "buildtime TEXT, buildhost TEXT, license TEXT, packager TEXT, size TEXT,"\
+                        "sourcerpm TEXT, url TEXT, vendor TEXT, committer TEXT, committime TEXT)"
 
 #include "hif-swdb.h"
 #include <stdio.h>
@@ -199,7 +217,6 @@ hif_swdb_class_init(HifSwdbClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
     object_class->finalize = hif_swdb_finalize;
-
 }
 
 // Object initialiser
@@ -285,6 +302,19 @@ static const guchar *_db_find_str_multi(sqlite3_stmt *res)
     }
 }
 
+static gint _db_find_multi	(sqlite3_stmt *res)
+{
+  	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
+    {
+        gint result = sqlite3_column_int(res, 0);
+        return result;
+    }
+  	else
+    {
+        sqlite3_finalize(res);
+	    return 0;
+    }
+}
 
 static gint _db_prepare	(	sqlite3 *db,
 						 	const gchar *sql,
@@ -387,15 +417,6 @@ static const gchar *_table_by_attribute(const gchar *attr)
 
 /*********************************** UTILS *************************************/
 
-
-/*
- * for all patterns:
- * -   find every match for given pattern in package names - split pattern by '-'
- * -   find every match in name for split patterns
- * -   construct all possible combinations from package info
- * -   compare given pattern with possible combinations
- */
-
 static GSList *_get_subpatterns(const gchar* pattern)
 {
     GSList *subpatterns = NULL;
@@ -421,6 +442,98 @@ static GSList *_get_subpatterns(const gchar* pattern)
     return subpatterns;
 }
 
+static GSList *_simple_search(sqlite3* db, const gchar * pattern)
+{
+    GSList *tids = NULL;
+    sqlite3_stmt *res_simple;
+    const gchar *sql_simple = SIMPLE_SEARCH;
+    DB_PREP(db, sql_simple, res_simple);
+    DB_BIND(res_simple, "@pat", pattern);
+    gint pid_simple;
+    GSList *simple = NULL;
+    while( (pid_simple = DB_FIND_MULTI(res_simple)))
+    {
+        simple = g_slist_append (simple, GINT_TO_POINTER(pid_simple));
+    }
+    while(simple)
+    {
+        pid_simple = GPOINTER_TO_INT(simple->data);
+        simple = simple->next;
+        GSList *pdids = _all_pdid_for_pid(db, pid_simple);
+        while(pdids)
+        {
+            gint pdid = GPOINTER_TO_INT(pdids->data);
+            pdids = pdids->next;
+            gint tid = _tid_from_pdid(db, pdid);
+            if(tid)
+            {
+                tids = g_slist_append (tids, GINT_TO_POINTER(tid));
+            }
+        }
+    }
+    return tids;
+}
+
+static GSList *_extended_search (sqlite3* db, const gchar *pattern)
+{
+    GSList *tids = NULL;
+    //split pattern into subpatterns - minimalising data processed
+    GSList *subpatterns = _get_subpatterns(pattern);
+    gchar *best_match = NULL;
+    gint best_match_count = 0;
+    while(subpatterns)
+    {
+        const gchar *subpattern = subpatterns->data;
+        subpatterns = subpatterns->next;
+
+        //find best subpattern
+        sqlite3_stmt *res;
+        const gchar *sql = FIND_PIDS_BY_NAME;
+        DB_PREP( db, sql, res);
+        DB_BIND(res, "@pattern", subpattern);
+        gint pid;
+        gint matches = 0;
+        while ((pid = DB_FIND_MULTI(res)))
+        {
+            matches++;
+        }
+        if (matches > 0)
+        {
+            if(best_match_count == 0 || matches < best_match_count)
+            {
+                best_match_count = matches;
+                best_match = (gchar *)subpattern;
+            }
+        }
+    }
+    sqlite3_stmt *res;
+    const gchar *sql = SEARCH_PATTERN;
+    DB_PREP( db, sql, res);
+    //lot of patterns...
+    DB_BIND(res, "@sub", best_match);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    gint pid = DB_FIND(res);
+    if(pid)
+    {
+        GSList *pdids = _all_pdid_for_pid(db, pid);
+        while(pdids)
+        {
+            gint pdid = GPOINTER_TO_INT(pdids->data);
+            pdids = pdids->next;
+            gint tid = _tid_from_pdid(db, pdid);
+            if(tid)
+            {
+                tids = g_slist_append (tids, GINT_TO_POINTER(tid));
+            }
+        }
+    }
+    return tids;
+}
 
 /**
 * hif_swdb_search:
@@ -428,27 +541,34 @@ static GSList *_get_subpatterns(const gchar* pattern)
 * Returns: (element-type gint32) (transfer container): list of constants
 */
 GSList *hif_swdb_search (   HifSwdb *self,
-                            const GSList *patterns,
-                            const gboolean ignore_case)
+                            const GSList *patterns)
 {
+    if (hif_swdb_open(self))
+        return NULL;
+    DB_TRANS_BEGIN
+
+    GSList *tids = NULL;
     while(patterns)
     {
         const gchar *pattern = patterns->data;
         patterns = patterns->next;
 
-        //split pattern into subpatterns
-        GSList *subpatterns = _get_subpatterns(pattern);
-        while(subpatterns)
+        //try simple search
+        GSList *simple =  _simple_search(self->db, pattern);
+        if(simple)
         {
-            const gchar *subpattern = subpatterns->data;
-            subpatterns = subpatterns->next;
-            //TODO: find most exact subpattern
+            tids = g_slist_concat(tids,simple);
+            continue;
         }
-
+        //need for extended search
+        GSList *extended = _extended_search(self->db, pattern);
+        if(extended)
+        {
+            tids = g_slist_concat(tids, extended);
+        }
     }
-    GSList *tids = NULL;
-    gint32 a = 1;
-    tids = g_slist_append (tids, GINT_TO_POINTER(a));
+    DB_TRANS_END
+    hif_swdb_close(self);
     return tids;
 }
 
@@ -694,6 +814,22 @@ static gint _pdid_from_pid (	sqlite3 *db,
     DB_BIND_INT(res, "@pid", pid);
     DB_STEP(res);
     return sqlite3_last_insert_rowid(db);
+}
+
+static GSList* _all_pdid_for_pid (	sqlite3 *db,
+								    const gint pid )
+{
+    GSList *pdids = NULL;
+    sqlite3_stmt *res;
+  	const gchar *sql = FIND_ALL_PDID_FOR_PID;
+  	DB_PREP(db, sql, res);
+  	DB_BIND_INT(res, "@pid", pid);
+    gint pdid;
+    while( (pdid = DB_FIND_MULTI(res)))
+    {
+        pdids = g_slist_append (pdids, GINT_TO_POINTER(pdid));
+    }
+    return pdids;
 }
 
 static gint _tid_from_pdid (	sqlite3 *db,
@@ -1227,6 +1363,7 @@ gint hif_swdb_create_db (HifSwdb *self)
     failed += _db_exec (self->db, C_ENV_GROUPS, NULL);
     failed += _db_exec (self->db, C_ENV, NULL);
     failed += _db_exec (self->db, C_ENV_EX, NULL);
+    failed += _db_exec (self->db, C_RPM_DATA, NULL);
 
   	if (failed != 0)
     {
