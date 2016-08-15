@@ -20,6 +20,11 @@
 * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+/*
+ * TODO: fix get_pkg_attr - problem with state/reason bindings, with installed_by
+ * Redo: get_packages_by_tid - must return whole package info list
+ */
+
 #define default_path "/var/lib/dnf/swdb.sqlite"
 
 #define DB_PREP(db, sql, res) assert(_db_prepare(db, sql, &res))
@@ -45,6 +50,9 @@
                         "installed_by=@installed_by,changed_by=@changed_by,installonly=@installonly,"\
                         "origin_url=@origin_url where P_ID=@pid"
 
+#define INSERT_RPM_DATA "INSERT into RPM_DATA values(@pid,@buildtime,@buildhost,@license,@packager,@size,@sourcerpm,@url,"\
+                        "@vendor,@committer,@committime)"
+
 #define INSERT_TRANS_DATA_BEG "insert into TRANS_DATA values(null,@tid,@pdid,null,@done,null,@reason,@state)"
 #define UPDATE_TRANS_DATA_END "UPDATE TRANS_DATA SET done=@done WHERE T_ID=@tid"
 #define UPDATE_TRANS_DATA_PID_END "UPDATE TRANS_DATA SET done=@done WHERE T_ID=@tid and PD_ID=@pdid and state=@state"
@@ -52,13 +60,16 @@
 #define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
 #define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid ORDER by PD_ID DESC"
 #define FIND_ALL_PDID_FOR_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
+#define GET_TRANS_CMDLINE "SELECT cmdline FROM TRANS WHERE T_ID=@tid"
 
 #define INSERT_PDID "insert into PACKAGE_DATA values(null,@pid,null,null,null,null,null,null,null)"
 #define FIND_TID_FROM_PDID "SELECT T_ID FROM TRANS_DATA WHERE PD_ID=@pdid"
 #define LOAD_OUTPUT "SELECT msg FROM OUTPUT WHERE T_ID=@tid and type=@type"
-#define PKG_DATA_ATTR_BY_PID "SELECT @attr FROM PACKAGE_DATA WHERE P_ID=@pid"
-#define TRANS_DATA_ATTR_BY_PDID "SELECT @attr FROM TRANS_DATA WHERE PD_ID=@pdid"
-#define TRANS_ATTR_BY_TID "SELECT @attr FROM TRANS WHERE T_ID=@tid"
+#define PKG_DATA_ATTR_BY_PID "FROM PACKAGE_DATA WHERE P_ID=@pid"
+#define TRANS_DATA_ATTR_BY_PDID "FROM TRANS_DATA WHERE PD_ID=@pdid"
+#define TRANS_ATTR_BY_TID "FROM TRANS WHERE T_ID=@tid"
+#define RPM_ATTR_BY_PID    "FROM RPM_DATA WHERE P_ID=@pid"
+#define PID_BY_TID  "select P_ID from TRANS_DATA join PACKAGE_DATA using(PD_ID) where T_ID=@tid"
 
 #define FIND_PKG_BY_NEVRA   "SELECT P_ID FROM PACKAGE WHERE name=@name and epoch=@epoch and version=@version and release=@release"\
                             " and arch=@arch and @type=type"
@@ -203,6 +214,21 @@ struct trans_data_beg_t
 	const gint 	pdid;
   	const gint 	reason;
 	const gint 	state;
+};
+
+struct rpm_data_t
+{
+    const gint   pid;
+    const gchar *buildtime;
+    const gchar *buildhost;
+    const gchar *license;
+    const gchar *packager;
+    const gchar *size;
+    const gchar *sourcerpm;
+    const gchar *url;
+    const gchar *vendor;
+    const gchar *committer;
+    const gchar *committime;
 };
 
 // Destructor
@@ -382,7 +408,7 @@ static gint _db_exec	(sqlite3 *db,
 static const gchar *_table_by_attribute(const gchar *attr)
 {
     gint table = 0;
-    if (!g_strcmp0(attr,"from_repo_revision")) table = 1;
+    if      (!g_strcmp0(attr,"from_repo_revision")) table = 1;
     else if (!g_strcmp0(attr,"from_repo_timestamp")) table = 1;
     else if (!g_strcmp0(attr,"installed_by")) table = 1;
     else if (!g_strcmp0(attr,"changed_by")) table = 1;
@@ -399,6 +425,16 @@ static const gchar *_table_by_attribute(const gchar *attr)
     else if (!g_strcmp0(attr,"ORIGINAL_TD_ID")) table = 3;
     else if (!g_strcmp0(attr,"reason")) table = 3;
     else if (!g_strcmp0(attr,"state")) table = 3;
+    else if (!g_strcmp0(attr,"buildtime")) table = 4;
+    else if (!g_strcmp0(attr,"buildhost")) table = 4;
+    else if (!g_strcmp0(attr,"license")) table = 4;
+    else if (!g_strcmp0(attr,"packager")) table = 4;
+    else if (!g_strcmp0(attr,"size")) table = 4;
+    else if (!g_strcmp0(attr,"sourcerpm")) table = 4;
+    else if (!g_strcmp0(attr,"url")) table = 4;
+    else if (!g_strcmp0(attr,"vendor")) table = 4;
+    else if (!g_strcmp0(attr,"committer")) table = 4;
+    else if (!g_strcmp0(attr,"committime")) table = 4;
 
     if (table == 1)
     {
@@ -411,6 +447,10 @@ static const gchar *_table_by_attribute(const gchar *attr)
     if (table == 3)
     {
         return "TRANS_DATA";
+    }
+    if (table == 4)
+    {
+        return "RPM_DATA";
     }
     return NULL; //attr not found
 }
@@ -842,7 +882,29 @@ static gint _tid_from_pdid (	sqlite3 *db,
   	return DB_FIND(res);
 }
 
-const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
+static GSList *_pids_by_tid (    sqlite3 *db,
+                                const gint tid)
+{
+    GSList *pids = NULL;
+    sqlite3_stmt *res;
+    const gchar* sql = PID_BY_TID;
+    DB_PREP(db, sql, res);
+    DB_BIND_INT(res, "@tid", tid);
+    gint pid;
+    while ( (pid = DB_FIND_MULTI(res)))
+    {
+        pids = g_slist_append(pids, GINT_TO_POINTER(pid));
+    }
+    return pids;
+}
+
+static const gchar *_insert_attr(const gchar *sql, const gchar* attr)
+{
+    return  g_strjoin(" " ,"SELECT" ,attr ,sql );
+}
+
+//FIXME CRITICAL! - could not bind table name -_- must to do it via strings
+const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
                                     const gint pid,
                                     const gchar *attribute)
 {
@@ -860,33 +922,35 @@ const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
             return NULL;
     }
     sqlite3_stmt *res;
-
     if (!g_strcmp0(table,"PACKAGE_DATA"))
     {
-        const gchar *sql = PKG_DATA_ATTR_BY_PID;
+        const gchar *sql = _insert_attr(PKG_DATA_ATTR_BY_PID, attribute);
         DB_PREP(self->db, sql, res);
-        DB_BIND(res, "@attr", attribute);
         DB_BIND_INT(res, "@pid", pid);
-        const guchar *rv = DB_FIND_STR(res);
+        gchar *str;
+        gchar *output = NULL;
+        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
+        {
+            output = g_strdup(str);
+        };
         hif_swdb_close(self);
-        return rv;
+        return output;
     }
     if (!g_strcmp0(table,"TRANS_DATA"))
     {
         //need to get PD_ID first
         const gint pdid = _pdid_from_pid(self->db, pid);
-        const gchar *sql = TRANS_DATA_ATTR_BY_PDID;
+        const gchar *sql = _insert_attr( TRANS_DATA_ATTR_BY_PDID, attribute);
         DB_PREP(self->db, sql, res);
-        DB_BIND(res, "@attr", attribute);
         DB_BIND_INT(res, "@pdid", pdid);
-        const guchar *rv;
+        const gchar *rv;
         if (!g_strcmp0(attribute,"reason"))
         {
             const gint rc_id = DB_FIND(res);
             rv = _look_for_desc(self->db, "REASON_TYPE", rc_id);
             hif_swdb_close(self);
             if (!rv)
-                return (guchar*)"Unknown";
+                return (gchar*)"Unknown";
             else
                 return rv;
         }
@@ -896,30 +960,137 @@ const guchar *hif_swdb_get_pkg_attr( HifSwdb *self,
             rv = _look_for_desc(self->db, "STATE_TYPE", rc_id);
             hif_swdb_close(self);
             if (!rv)
-                return (guchar*)"Unknown";
+                return (gchar*)"Unknown";
             else
                 return rv;
         }
-        rv = DB_FIND_STR(res);
+        gchar *str;
+        gchar *output = NULL;
+        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
+        {
+            output = g_strdup(str);
+        }
         hif_swdb_close(self);
-        return rv;
+        return output;
     }
     if (!g_strcmp0(table,"TRANS"))
     {
         //need to get T_ID first via PD_ID
         const gint pdid = _pdid_from_pid(self->db, pid);
         const gint tid = _tid_from_pdid(self->db, pdid);
-        const gchar *sql = TRANS_ATTR_BY_TID;
+        const gchar *sql = _insert_attr( TRANS_ATTR_BY_TID, attribute);
         DB_PREP(self->db, sql, res);
-        DB_BIND(res, "@attr", attribute);
         DB_BIND_INT(res, "@tid", tid);
-        const guchar *rv = DB_FIND_STR(res);
+        gchar *str;
+        gchar *output = NULL;
+        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
+        {
+            output = g_strdup(str);
+        }
         hif_swdb_close(self);
-        return rv;
+        return output;
+    }
+    if (!g_strcmp0(table,"RPM_DATA"))
+    {
+        const gchar *sql = _insert_attr (RPM_ATTR_BY_PID, attribute);
+        DB_PREP(self->db, sql, res);
+        DB_BIND_INT(res, "@pid", pid);
+        gchar *str;
+        gchar *output= NULL;
+        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
+        {
+            output = g_strdup(str);
+        }
+        hif_swdb_close(self);
+        return output;
     }
     hif_swdb_close(self);
     return NULL;
 }
+
+//TODO: This will be painfull - need to pass whole package info not just list of pids
+/**
+* hif_swdb_get_packages_by_tid:
+*
+* Returns: (element-type utf8)(array)(transfer container): list of constants
+*/
+GPtrArray *hif_swdb_get_packages_by_tid(   HifSwdb *self,
+                                            const gint tid)
+{
+    if (hif_swdb_open(self))
+    	return NULL;
+
+    GPtrArray *node = g_ptr_array_new();
+    gchar *string1 = "one";
+    gchar *string2 = "two";
+    gchar *string3 = "three";
+    g_ptr_array_add (node, (gpointer) string1);
+    g_ptr_array_add (node, (gpointer) string2);
+    g_ptr_array_add (node, (gpointer) string3);
+    GPtrArray *node2 = g_ptr_array_new();
+    gchar *string12 = "one2";
+    gchar *string22 = "two2";
+    gchar *string32 = "three2";
+    g_ptr_array_add (node2, (gpointer) string12);
+    g_ptr_array_add (node2, (gpointer) string22);
+    g_ptr_array_add (node2, (gpointer) string32);
+    GPtrArray *header = g_ptr_array_new();
+    g_ptr_array_add (header, (gpointer) node );
+    g_ptr_array_add (header, (gpointer) node2 );
+    //node = _pids_by_tid(self->db, tid);
+
+    hif_swdb_close(self);
+    return header;
+}
+
+/**************************** RPM DATA PERSISTOR *****************************/
+
+static gint _rpm_data_insert (sqlite3 *db, struct rpm_data_t *rpm_data)
+{
+  	sqlite3_stmt *res;
+   	const gchar *sql = INSERT_RPM_DATA;
+	DB_PREP(db,sql,res);
+  	DB_BIND_INT(res, "@pid", rpm_data->pid);
+  	DB_BIND(res, "@buildtime", rpm_data->buildtime);
+  	DB_BIND(res, "@buildhost", rpm_data->buildhost);
+  	DB_BIND(res, "@license", rpm_data->license);
+  	DB_BIND(res, "@packager", rpm_data->packager);
+  	DB_BIND(res, "@size", rpm_data->size);
+  	DB_BIND(res, "@sourcerpm", rpm_data->sourcerpm);
+    DB_BIND(res, "@url", rpm_data->url);
+    DB_BIND(res, "@vendor", rpm_data->vendor);
+    DB_BIND(res, "@committer", rpm_data->committer);
+    DB_BIND(res, "@committime", rpm_data->committime);
+	DB_STEP(res);
+  	return 0;
+}
+
+
+gint 	hif_swdb_log_rpm_data(	HifSwdb *self,
+									const gint   pid,
+                                  	const gchar *buildtime,
+                                    const gchar *buildhost,
+                                    const gchar *license,
+                                    const gchar *packager,
+                                    const gchar *size,
+                                    const gchar *sourcerpm,
+                                    const gchar *url,
+                                    const gchar *vendor,
+                                    const gchar *committer,
+                                    const gchar *committime)
+{
+  	if (hif_swdb_open(self))
+    	return 1;
+
+  	struct rpm_data_t rpm_data = {  pid, buildtime, buildhost, license, packager,
+                                    size, sourcerpm, url, vendor, committer, committime};
+
+
+  	gint rc = _rpm_data_insert(self->db, &rpm_data);
+  	hif_swdb_close(self);
+  	return rc;
+}
+
 
 /*************************** TRANS DATA PERSISTOR ****************************/
 
@@ -1064,6 +1235,30 @@ gint 	hif_swdb_trans_end 	(	HifSwdb *self,
   	return rc;
 }
 
+/**
+* hif_swdb_trans_cmdline:
+*
+* Returns: (element-type utf8) (transfer container): list of constants
+*/
+GPtrArray *hif_swdb_trans_cmdline (   HifSwdb *self,
+							 	        const gint tid)
+{
+	if (hif_swdb_open(self))
+    	return NULL;
+    sqlite3_stmt *res;
+    const gchar *sql = GET_TRANS_CMDLINE;
+    DB_PREP(self->db, sql, res);
+    DB_BIND_INT(res, "@tid", tid);
+    GPtrArray *rv = g_ptr_array_new();
+    gchar *cmdline;
+    while( (cmdline = (gchar *)DB_FIND_STR_MULTI(res)))
+    {
+        g_ptr_array_add(rv, g_strdup(cmdline));
+    }
+    hif_swdb_close(self);
+  	return rv;
+}
+
 
 /****************************** OUTPUT PERSISTOR *****************************/
 
@@ -1113,7 +1308,7 @@ gint hif_swdb_log_output	(	HifSwdb *self,
   	return rc;
 }
 
-static GSList *_load_output (       sqlite3 *db,
+static GPtrArray *_load_output (       sqlite3 *db,
                                     const gint tid,
                                     const gint type)
 {
@@ -1122,11 +1317,11 @@ static GSList *_load_output (       sqlite3 *db,
   	DB_PREP(db,sql,res);
   	DB_BIND_INT(res, "@tid", tid);
   	DB_BIND_INT(res, "@type", type);
-    GSList *l = NULL;
+    GPtrArray *l = g_ptr_array_new();
     gchar *row;
     while( (row = (gchar *)DB_FIND_STR_MULTI(res)) )
     {
-        l = g_slist_append (l, g_strdup(row));
+        g_ptr_array_add(l, g_strdup(row));
     }
     return l;
 }
@@ -1136,13 +1331,13 @@ static GSList *_load_output (       sqlite3 *db,
 *
 * Returns: (element-type utf8) (transfer container): list of constants
 */
-GSList *hif_swdb_load_error (       HifSwdb *self,
+GPtrArray *hif_swdb_load_error (       HifSwdb *self,
                                     const gint tid)
 {
     if (hif_swdb_open(self))
     	return NULL;
     DB_TRANS_BEGIN
-    GSList *rc = _load_output(      self->db,
+    GPtrArray *rc = _load_output(      self->db,
                                     tid,
                                     hif_swdb_get_output_type(self, "stderr"));
     DB_TRANS_END
@@ -1155,13 +1350,13 @@ GSList *hif_swdb_load_error (       HifSwdb *self,
 *
 * Returns: (element-type utf8) (transfer container): list of constants
 */
-GSList *hif_swdb_load_output (      HifSwdb *self,
+GPtrArray *hif_swdb_load_output (      HifSwdb *self,
                                     const gint tid)
 {
     if (hif_swdb_open(self))
     	return NULL;
     DB_TRANS_BEGIN
-    GSList *rc = _load_output( self->db,
+    GPtrArray *rc = _load_output( self->db,
                                     tid,
                                     hif_swdb_get_output_type(self, "stdout"));
     DB_TRANS_END
@@ -1200,13 +1395,13 @@ static gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
   	return sqlite3_last_insert_rowid(db);
 }
 
-static const guchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id)
+static const gchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id)
 {
     sqlite3_stmt *res;
     gchar *sql = g_strjoin(" ","select description from",table,"where ID=@id", NULL);
   	DB_PREP(db, sql, res);
     DB_BIND_INT(res, "@id", id);
-	return DB_FIND_STR(res);
+	return (const gchar *)DB_FIND_STR(res);
 }
 
 /* Bind description to id in chosen table
