@@ -14,6 +14,7 @@ g-ir-compiler Hif-1.0.gir > Hif-1.0.typelib
 #ipython
 cp hif-swdb.c /home/edynox/devel/libhif/libhif/
 cp hif-swdb.h /home/edynox/devel/libhif/libhif/
+cp hif-swdb-sql.h /home/edynox/devel/libhif/libhif/
 cd '/home/edynox/devel/libhif/build/'
 cmake ..
 make

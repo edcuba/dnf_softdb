@@ -20,11 +20,6 @@
 * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-/*
- * TODO: fix get_pkg_attr - problem with state/reason bindings, with installed_by
- * Redo: get_packages_by_tid - must return whole package info list
- */
-
 #define default_path "/var/lib/dnf/swdb.sqlite"
 
 #define DB_PREP(db, sql, res) assert(_db_prepare(db, sql, &res))
@@ -40,113 +35,11 @@
 #define DB_TRANS_BEGIN 	self->running = 1;
 #define DB_TRANS_END	self->running = 0;
 
-#define INSERT_PKG "insert into PACKAGE values(null,@name,@epoch,@version,@release,@arch,@cdata,@ctype,@type)"
-#define INSERT_OUTPUT "insert into OUTPUT values(null,@tid,@msg,@type)"
-#define INSERT_TRANS_BEG "insert into TRANS values(null,@beg,null,@rpmdbv,@cmdline,@loginuid,@releasever,null)"
-#define INSERT_TRANS_END "UPDATE TRANS SET end_timestamp=@end,return_code=@rc WHERE T_ID=@tid"
-#define INSERT_REPO "insert into REPO values(null,@name,null,null)"
-
-#define UPDATE_PKG_DATA "UPDATE PACKAGE_DATA SET R_ID=@rid,from_repo_revision=@repo_r,from_repo_timestamp=@repo_t,"\
-                        "installed_by=@installed_by,changed_by=@changed_by,installonly=@installonly,"\
-                        "origin_url=@origin_url where P_ID=@pid"
-
-#define INSERT_RPM_DATA "INSERT into RPM_DATA values(@pid,@buildtime,@buildhost,@license,@packager,@size,@sourcerpm,@url,"\
-                        "@vendor,@committer,@committime)"
-
-#define INSERT_TRANS_DATA_BEG "insert into TRANS_DATA values(null,@tid,@pdid,null,@done,null,@reason,@state)"
-#define UPDATE_TRANS_DATA_END "UPDATE TRANS_DATA SET done=@done WHERE T_ID=@tid"
-#define UPDATE_TRANS_DATA_PID_END "UPDATE TRANS_DATA SET done=@done WHERE T_ID=@tid and PD_ID=@pdid and state=@state"
-
-#define FIND_REPO_BY_NAME "SELECT R_ID FROM REPO WHERE name=@name"
-#define FIND_PDID_FROM_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid ORDER by PD_ID DESC"
-#define FIND_ALL_PDID_FOR_PID "SELECT PD_ID FROM PACKAGE_DATA WHERE P_ID=@pid"
-#define GET_TRANS_CMDLINE "SELECT cmdline FROM TRANS WHERE T_ID=@tid"
-
-#define INSERT_PDID "insert into PACKAGE_DATA values(null,@pid,null,null,null,null,null,null,null)"
-#define FIND_TID_FROM_PDID "SELECT T_ID FROM TRANS_DATA WHERE PD_ID=@pdid"
-#define LOAD_OUTPUT "SELECT msg FROM OUTPUT WHERE T_ID=@tid and type=@type"
-#define PKG_DATA_ATTR_BY_PID "FROM PACKAGE_DATA WHERE P_ID=@pid"
-#define TRANS_DATA_ATTR_BY_PDID "FROM TRANS_DATA WHERE PD_ID=@pdid"
-#define TRANS_ATTR_BY_TID "FROM TRANS WHERE T_ID=@tid"
-#define RPM_ATTR_BY_PID    "FROM RPM_DATA WHERE P_ID=@pid"
-#define PID_BY_TID  "select P_ID from TRANS_DATA join PACKAGE_DATA using(PD_ID) where T_ID=@tid"
-
-#define FIND_PKG_BY_NEVRA   "SELECT P_ID FROM PACKAGE WHERE name=@name and epoch=@epoch and version=@version and release=@release"\
-                            " and arch=@arch and @type=type"
-#define FIND_PKG_BY_NEVRACHT "SELECT P_ID FROM PACKAGE WHERE name=@name and epoch=@epoch and version=@version and release=@release"\
-                            " and arch=@arch and @type=type and checksum_data=@cdata and checksum_type=@ctype"
-
-#define FIND_PIDS_BY_NAME "SELECT P_ID FROM PACKAGE WHERE NAME LIKE @pattern"
-
-#define SIMPLE_SEARCH "SELECT P_ID FROM PACKAGE WHERE name LIKE @pat"
-#define SEARCH_PATTERN "SELECT P_ID,name,epoch,version,release,arch,"\
-  "name || '.' || arch AS sql_nameArch,"\
-  "name || '-' || version || '-' || release || '.' || arch AS sql_nameVerRelArch,"\
-  "name || '-' || version AS sql_nameVer,"\
-  "name || '-' || version || '-' || release AS sql_nameVerRel,"\
-  "epoch || ':' || name || '-' || version || '-' || release || '-' || arch AS sql_envra,"\
-  "name || '-' || epoch || '-' || version || '-' || release || '-' || arch AS sql_nevra "\
-  "FROM PACKAGE WHERE name LIKE @sub AND (sql_nameArch LIKE @pat OR sql_nameVerRelArch LIKE @pat OR sql_nameVer LIKE @pat OR"\
-  " sql_nameVerRel LIKE @pat OR sql_nevra LIKE @pat OR sql_envra LIKE @pat)"
-
-#define C_PKG_DATA 		"CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"\
-                    	"P_ID integer, R_ID integer, from_repo_revision text,"\
-                    	"from_repo_timestamp text, installed_by text, changed_by text,"\
-                    	"installonly text, origin_url text)"
-
-#define C_PKG 			"CREATE TABLE PACKAGE ( P_ID integer primary key, name text,"\
-						"epoch text, version text, release text, arch text,"\
-						"checksum_data text, checksum_type text, type integer)"
-
-#define C_REPO			"CREATE TABLE REPO (R_ID INTEGER PRIMARY KEY, name text,"\
-                    	"last_synced text, is_expired text)"
-
-#define C_TRANS_DATA	"CREATE TABLE TRANS_DATA (TD_ID INTEGER PRIMARY KEY,"\
-                        "T_ID integer,PD_ID integer, G_ID integer, done INTEGER,"\
-                        "ORIGINAL_TD_ID integer, reason integer, state integer)"
-
-#define C_TRANS 		"CREATE TABLE TRANS (T_ID integer primary key, beg_timestamp text,"\
-                        "end_timestamp text, RPMDB_version text, cmdline text,"\
-                        "loginuid text, releasever text, return_code integer)"
-
-#define C_OUTPUT		"CREATE TABLE OUTPUT (O_ID integer primary key,T_ID INTEGER,"\
-						"msg text, type integer)"
-
-
-#define C_STATE_TYPE	"CREATE TABLE STATE_TYPE (ID INTEGER PRIMARY KEY, description text)"
-#define C_REASON_TYPE	"CREATE TABLE REASON_TYPE (ID INTEGER PRIMARY KEY, description text)"
-#define C_OUTPUT_TYPE	"CREATE TABLE OUTPUT_TYPE (ID INTEGER PRIMARY KEY, description text)"
-#define C_PKG_TYPE		"CREATE TABLE PACKAGE_TYPE (ID INTEGER PRIMARY KEY, description text)"
-
-#define C_GROUPS		"CREATE TABLE GROUPS (G_ID INTEGER PRIMARY KEY, name_id text, name text,"\
-                        "ui_name text, is_installed integer, pkg_types integer, grp_types integer)"
-
-#define C_T_GROUP_DATA	"CREATE TABLE TRANS_GROUP_DATA (TG_ID INTEGER PRIMARY KEY,"\
-						"T_ID integer, G_ID integer, name_id text, name text, ui_name text,"\
-                        "is_installed integer, pkg_types integer, grp_types integer)"
-
-#define C_GROUPS_PKG	"CREATE TABLE GROUPS_PACKAGE (GP_ID INTEGER PRIMARY KEY,"\
-                        "G_ID integer, name text)"
-
-#define C_GROUPS_EX		"CREATE TABLE GROUPS_EXCLUDE (GE_ID INTEGER PRIMARY KEY,"\
-                        "G_ID integer, name text)"
-
-#define C_ENV_GROUPS	"CREATE TABLE ENVIRONMENTS_GROUPS (EG_ID INTEGER PRIMARY KEY,"\
-                        "E_ID integer, G_ID integer)"
-
-#define C_ENV			"CREATE TABLE ENVIRONMENTS (E_ID INTEGER PRIMARY KEY, name_id text,"\
-                        "name text, ui_name text, pkg_types integer, grp_types integer)"
-
-#define C_ENV_EX		"CREATE TABLE ENVIRONMENTS_EXCLUDE (EE_ID INTEGER PRIMARY KEY,"\
-                        "E_ID integer, name text)"
-#define C_RPM_DATA      "CREATE TABLE RPM_DATA (RPM_ID INTEGER PRIMARY KEY, P_ID INTEGER,"\
-                        "buildtime TEXT, buildhost TEXT, license TEXT, packager TEXT, size TEXT,"\
-                        "sourcerpm TEXT, url TEXT, vendor TEXT, committer TEXT, committime TEXT)"
-
 #include "hif-swdb.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include "hif-swdb-sql.h"
 
 struct _HifSwdb
 {
@@ -159,6 +52,7 @@ struct _HifSwdb
 };
 
 G_DEFINE_TYPE(HifSwdb, hif_swdb, G_TYPE_OBJECT)
+G_DEFINE_TYPE(HifSwdbPkg, hif_swdb_pkg, G_TYPE_OBJECT) //history package
 
 /* Table structs */
 struct package_t
@@ -268,6 +162,55 @@ HifSwdb* hif_swdb_new(void)
   	return swdb;
 }
 
+
+// Destructor
+static void hif_swdb_pkg_finalize(GObject *object)
+{
+    G_OBJECT_CLASS (hif_swdb_pkg_parent_class)->finalize (object);
+}
+
+// Class initialiser
+static void
+hif_swdb_pkg_class_init(HifSwdbPkgClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = hif_swdb_pkg_finalize;
+}
+
+// Object initialiser
+static void
+hif_swdb_pkg_init(HifSwdbPkg *self)
+{
+}
+
+/**
+ * hif_swdb_pkg_new:
+ *
+ * Creates a new #HifSwdbPkg.
+ *
+ * Returns: a #HifSwdbPkg
+ **/
+HifSwdbPkg* hif_swdb_pkg_new(   const gchar* name,
+                                const gchar* epoch,
+                                const gchar* version,
+                                const gchar* release,
+                                const gchar* arch,
+                                const gchar* checksum_data,
+                                const gchar* checksum_type,
+                                const gchar* type)
+{
+    HifSwdbPkg *swdbpkg = g_object_new(HIF_TYPE_SWDB_PKG, NULL);
+    swdbpkg->name = g_strdup(name);
+    swdbpkg->epoch = g_strdup(epoch);
+    swdbpkg->version = g_strdup(version);
+    swdbpkg->release = g_strdup(release);
+    swdbpkg->arch = g_strdup(arch);
+    swdbpkg->checksum_data = g_strdup(checksum_data);
+    swdbpkg->checksum_type = g_strdup(checksum_type);
+    if (type) swdbpkg->type = g_strdup(type); else swdbpkg->type = NULL;
+  	return swdbpkg;
+}
+
 /******************************* Functions *************************************/
 
 static gint _db_step	(sqlite3_stmt *res)
@@ -299,11 +242,11 @@ static gint _db_find	(sqlite3_stmt *res)
 }
 
 // assumes only one text parameter on output e.g "SELECT DESC FROM DUMMY WHERE ..."
-static const guchar *_db_find_str(sqlite3_stmt *res)
+static gchar *_db_find_str(sqlite3_stmt *res)
 {
   	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
     {
-        const guchar * result = sqlite3_column_text(res, 0);
+        gchar * result = g_strdup((gchar *)sqlite3_column_text(res, 0));
         sqlite3_finalize(res);
         return result;
     }
@@ -314,11 +257,11 @@ static const guchar *_db_find_str(sqlite3_stmt *res)
     }
 }
 
-static const guchar *_db_find_str_multi(sqlite3_stmt *res)
+static gchar *_db_find_str_multi(sqlite3_stmt *res)
 {
   	if (sqlite3_step(res) == SQLITE_ROW ) // id for description found
     {
-        const guchar * result = sqlite3_column_text(res, 0);
+        gchar * result = g_strdup((gchar *)sqlite3_column_text(res, 0));
         return result;
     }
   	else
@@ -900,10 +843,9 @@ static GSList *_pids_by_tid (    sqlite3 *db,
 
 static const gchar *_insert_attr(const gchar *sql, const gchar* attr)
 {
-    return  g_strjoin(" " ,"SELECT" ,attr ,sql );
+    return  g_strjoin(" ", "SELECT", attr, sql, NULL);
 }
 
-//FIXME CRITICAL! - could not bind table name -_- must to do it via strings
 const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
                                     const gint pid,
                                     const gchar *attribute)
@@ -927,12 +869,7 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         const gchar *sql = _insert_attr(PKG_DATA_ATTR_BY_PID, attribute);
         DB_PREP(self->db, sql, res);
         DB_BIND_INT(res, "@pid", pid);
-        gchar *str;
-        gchar *output = NULL;
-        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
-        {
-            output = g_strdup(str);
-        };
+        gchar *output = DB_FIND_STR(res);
         hif_swdb_close(self);
         return output;
     }
@@ -943,7 +880,7 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         const gchar *sql = _insert_attr( TRANS_DATA_ATTR_BY_PDID, attribute);
         DB_PREP(self->db, sql, res);
         DB_BIND_INT(res, "@pdid", pdid);
-        const gchar *rv;
+        gchar *rv;
         if (!g_strcmp0(attribute,"reason"))
         {
             const gint rc_id = DB_FIND(res);
@@ -964,12 +901,7 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
             else
                 return rv;
         }
-        gchar *str;
-        gchar *output = NULL;
-        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
-        {
-            output = g_strdup(str);
-        }
+        gchar *output = DB_FIND_STR(res);
         hif_swdb_close(self);
         return output;
     }
@@ -981,12 +913,7 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         const gchar *sql = _insert_attr( TRANS_ATTR_BY_TID, attribute);
         DB_PREP(self->db, sql, res);
         DB_BIND_INT(res, "@tid", tid);
-        gchar *str;
-        gchar *output = NULL;
-        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
-        {
-            output = g_strdup(str);
-        }
+        gchar *output = DB_FIND_STR(res);
         hif_swdb_close(self);
         return output;
     }
@@ -995,12 +922,7 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
         const gchar *sql = _insert_attr (RPM_ATTR_BY_PID, attribute);
         DB_PREP(self->db, sql, res);
         DB_BIND_INT(res, "@pid", pid);
-        gchar *str;
-        gchar *output= NULL;
-        while((str = (gchar *)DB_FIND_STR_MULTI(res)))
-        {
-            output = g_strdup(str);
-        }
+        gchar *output= DB_FIND_STR(res);
         hif_swdb_close(self);
         return output;
     }
@@ -1008,39 +930,63 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
     return NULL;
 }
 
-//TODO: This will be painfull - need to pass whole package info not just list of pids
+static HifSwdbPkg *_get_package_by_pid (    sqlite3 *db,
+                                            const gint pid)
+{
+    sqlite3_stmt *res;
+    const gchar *sql = S_PACKAGE_BY_PID;
+    DB_PREP(db, sql, res);
+    DB_BIND_INT(res, "@pid", pid);
+    if (sqlite3_step(res) == SQLITE_ROW)
+    {
+        HifSwdbPkg *pkg = hif_swdb_pkg_new(
+            (gchar *)sqlite3_column_text(res, 0), //name
+            (gchar *)sqlite3_column_text(res, 1), //epoch
+            (gchar *)sqlite3_column_text(res, 2), //version
+            (gchar *)sqlite3_column_text(res, 3), //release
+            (gchar *)sqlite3_column_text(res, 4), //arch
+            (gchar *)sqlite3_column_text(res, 5), //checksum_data
+            (gchar *)sqlite3_column_text(res, 6), //checksum_type
+            NULL //type for now
+        );
+        gint type = sqlite3_column_int(res, 7); //unresolved type
+        sqlite3_finalize(res);
+        pkg->type = _look_for_desc(db, "PACKAGE_TYPE", type);
+        return pkg;
+    }
+    sqlite3_finalize(res);
+    return NULL;
+}
+
 /**
 * hif_swdb_get_packages_by_tid:
 *
-* Returns: (element-type utf8)(array)(transfer container): list of constants
+* Returns: (element-type HifSwdbPkg)(array)(transfer container): list of #HifSwdbPkg
 */
 GPtrArray *hif_swdb_get_packages_by_tid(   HifSwdb *self,
                                             const gint tid)
 {
     if (hif_swdb_open(self))
     	return NULL;
+    DB_TRANS_BEGIN
 
     GPtrArray *node = g_ptr_array_new();
-    gchar *string1 = "one";
-    gchar *string2 = "two";
-    gchar *string3 = "three";
-    g_ptr_array_add (node, (gpointer) string1);
-    g_ptr_array_add (node, (gpointer) string2);
-    g_ptr_array_add (node, (gpointer) string3);
-    GPtrArray *node2 = g_ptr_array_new();
-    gchar *string12 = "one2";
-    gchar *string22 = "two2";
-    gchar *string32 = "three2";
-    g_ptr_array_add (node2, (gpointer) string12);
-    g_ptr_array_add (node2, (gpointer) string22);
-    g_ptr_array_add (node2, (gpointer) string32);
-    GPtrArray *header = g_ptr_array_new();
-    g_ptr_array_add (header, (gpointer) node );
-    g_ptr_array_add (header, (gpointer) node2 );
-    //node = _pids_by_tid(self->db, tid);
-
+    GSList *pids = _pids_by_tid(self->db, tid);
+    gint pid;
+    HifSwdbPkg *pkg;
+    while (pids)
+    {
+        pid = GPOINTER_TO_INT(pids->data);
+        pids = pids->next;
+        pkg = _get_package_by_pid(self->db, pid);
+        if(pkg)
+        {
+            g_ptr_array_add(node, (gpointer) pkg);
+        }
+    }
+    DB_TRANS_END
     hif_swdb_close(self);
-    return header;
+    return node;
 }
 
 /**************************** RPM DATA PERSISTOR *****************************/
@@ -1235,12 +1181,7 @@ gint 	hif_swdb_trans_end 	(	HifSwdb *self,
   	return rc;
 }
 
-/**
-* hif_swdb_trans_cmdline:
-*
-* Returns: (element-type utf8) (transfer container): list of constants
-*/
-GPtrArray *hif_swdb_trans_cmdline (   HifSwdb *self,
+const gchar *hif_swdb_trans_cmdline (   HifSwdb *self,
 							 	        const gint tid)
 {
 	if (hif_swdb_open(self))
@@ -1249,14 +1190,9 @@ GPtrArray *hif_swdb_trans_cmdline (   HifSwdb *self,
     const gchar *sql = GET_TRANS_CMDLINE;
     DB_PREP(self->db, sql, res);
     DB_BIND_INT(res, "@tid", tid);
-    GPtrArray *rv = g_ptr_array_new();
-    gchar *cmdline;
-    while( (cmdline = (gchar *)DB_FIND_STR_MULTI(res)))
-    {
-        g_ptr_array_add(rv, g_strdup(cmdline));
-    }
+    const gchar *cmdline = DB_FIND_STR(res);
     hif_swdb_close(self);
-  	return rv;
+  	return cmdline;
 }
 
 
@@ -1395,13 +1331,13 @@ static gint _insert_desc(sqlite3 *db, const gchar *table, const gchar *desc)
   	return sqlite3_last_insert_rowid(db);
 }
 
-static const gchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id)
+static gchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id)
 {
     sqlite3_stmt *res;
     gchar *sql = g_strjoin(" ","select description from",table,"where ID=@id", NULL);
   	DB_PREP(db, sql, res);
     DB_BIND_INT(res, "@id", id);
-	return (const gchar *)DB_FIND_STR(res);
+    return DB_FIND_STR(res);
 }
 
 /* Bind description to id in chosen table

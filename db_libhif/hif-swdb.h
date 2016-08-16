@@ -30,6 +30,32 @@
 
 G_BEGIN_DECLS
 
+//Package holder for swdb history
+#define HIF_TYPE_SWDB_PKG ( hif_swdb_pkg_get_type())
+G_DECLARE_FINAL_TYPE ( HifSwdbPkg, hif_swdb_pkg, HIF, SWDB_PKG, GObject)
+struct _HifSwdbPkg
+{
+	GObject parent_instance;
+    const gchar *name;
+	const gchar *epoch;
+	const gchar *version;
+	const gchar *release;
+	const gchar *arch;
+	const gchar *checksum_data;
+	const gchar *checksum_type;
+	const gchar *type;
+};
+
+HifSwdbPkg* hif_swdb_pkg_new(   const gchar* name,
+                                const gchar* epoch,
+                                const gchar* version,
+                                const gchar* release,
+                                const gchar* arch,
+                                const gchar* checksum_data,
+                                const gchar* checksum_type,
+                                const gchar* type);
+
+
 #define HIF_TYPE_SWDB (hif_swdb_get_type ())
 G_DECLARE_FINAL_TYPE (HifSwdb, hif_swdb, HIF,SWDB, GObject) // structure,function prefix,namespace,object name,inherits
 
@@ -141,7 +167,7 @@ const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
 											const gchar *type,
 											const gboolean create);
 
-static const gchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id);
+static gchar* _look_for_desc(sqlite3 *db, const gchar *table, const gint id);
 
 GSList *hif_swdb_search (   HifSwdb *self,
 							const GSList *patterns);
@@ -171,7 +197,7 @@ gint 	hif_swdb_log_rpm_data(	HifSwdb *self,
 GPtrArray *hif_swdb_get_packages_by_tid(   HifSwdb *self,
                                     		const gint tid);
 
-GPtrArray* hif_swdb_trans_cmdline (   HifSwdb *self,
+const gchar * hif_swdb_trans_cmdline (   HifSwdb *self,
 							 	        const gint tid);
 
 G_END_DECLS
