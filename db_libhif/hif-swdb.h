@@ -50,11 +50,17 @@ gint hif_swdb_create_db (HifSwdb *self);
 /* Remove old and create new */
 gint hif_swdb_reset_db (HifSwdb *self);
 
-gint hif_swdb_add_group_package (HifSwdb *self, gint gid, const gchar *name);
+gint hif_swdb_group_add_package (       HifSwdbGroup *group,
+                                        GPtrArray *packages);
 
-gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, const gchar *name);
+gint hif_swdb_group_add_exclude (       HifSwdbGroup *group,
+                                        GPtrArray *exclude);
 
-gint hif_swdb_add_environments_exclude (HifSwdb *self, gint eid, const gchar *name);
+gint hif_swdb_env_add_exclude (     HifSwdbEnv *env,
+                                    GPtrArray *exclude);
+
+gint hif_swdb_env_add_group (     HifSwdbEnv *env,
+                                    GPtrArray *groups);
 
 gint hif_swdb_open(HifSwdb *self);
 
@@ -183,6 +189,14 @@ GPtrArray *hif_swdb_trans_old(	HifSwdb *self,
 
 GPtrArray *hif_swdb_trans_get_old_trans_data(	HifSwdbTrans *self);
 GPtrArray *hif_swdb_get_old_trans_data(	HifSwdb *self, HifSwdbTrans *trans);
+
+gint hif_swdb_add_group (   HifSwdb *self,
+                            HifSwdbGroup *group);
+
+gint hif_swdb_add_env (     HifSwdb *self,
+                            HifSwdbEnv *env);
+
+HifSwdbGroup *hif_swdb_new_SwdbGroup    (HifSwdb *self);
 
 G_END_DECLS
 

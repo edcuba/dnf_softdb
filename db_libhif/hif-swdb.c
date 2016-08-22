@@ -21,10 +21,11 @@
 */
 
 /* TODO:    -   Fix fixmes
-            -   Get rid of YumHistoryPackageState
             -   Replace structs with Gobjects
-            -   Get rid of all classes in dnf/yum/istory.py
+            -   Get rid of all classes in dnf/yum/history.py
             -   Think about GOM
+            -   gboolean env.installed()
+            -   constructor workaround for could not set field bug in python - change behavior in comps.py also...
  */
 
 
@@ -63,6 +64,8 @@ G_DEFINE_TYPE(HifSwdb, hif_swdb, G_TYPE_OBJECT)
 G_DEFINE_TYPE(HifSwdbPkg, hif_swdb_pkg, G_TYPE_OBJECT) //history package
 G_DEFINE_TYPE(HifSwdbTrans, hif_swdb_trans, G_TYPE_OBJECT) //history transaction
 G_DEFINE_TYPE(HifSwdbTransData, hif_swdb_transdata, G_TYPE_OBJECT) //history transaction data
+G_DEFINE_TYPE(HifSwdbGroup, hif_swdb_group, G_TYPE_OBJECT)
+G_DEFINE_TYPE(HifSwdbEnv, hif_swdb_env, G_TYPE_OBJECT)
 
 /* Table structs */
 struct package_t
@@ -191,6 +194,9 @@ hif_swdb_pkg_class_init(HifSwdbPkgClass *klass)
 static void
 hif_swdb_pkg_init(HifSwdbPkg *self)
 {
+    self->done = 0;
+    self->state = NULL;
+    self->pid = 0;
 }
 
 /**
@@ -319,9 +325,101 @@ HifSwdbTransData* hif_swdb_transdata_new(   gint tdid,
     data->gid = gid;
     data->done = done;
     data->ORIGINAL_TD_ID = ORIGINAL_TD_ID;
-    data->reason = reason;
-    data->state = state;
+    data->reason = g_strdup(reason);
+    data->state = g_strdup(state);
     return data;
+}
+
+
+// Group destructor
+static void hif_swdb_group_finalize(GObject *object)
+{
+    G_OBJECT_CLASS (hif_swdb_group_parent_class)->finalize (object);
+}
+
+// Group Class initialiser
+static void
+hif_swdb_group_class_init(HifSwdbGroupClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = hif_swdb_group_finalize;
+}
+
+// Group Object initialiser
+static void
+hif_swdb_group_init(HifSwdbGroup *self)
+{
+    self->gid = 0;
+    self->swdb = NULL;
+    self->is_installed = 0;
+}
+
+/**
+ * hif_swdb_group_new:
+ *
+ * Creates a new #HifSwdbGroup.
+ *
+ * Returns: a #HifSwdbGroup
+ **/
+HifSwdbGroup* hif_swdb_group_new(	const gchar* name_id,
+									const gchar* name,
+									const gchar* ui_name,
+									gint is_installed,
+									gint pkg_types,
+									gint grp_types)
+{
+    HifSwdbGroup *group = g_object_new(HIF_TYPE_SWDB_GROUP, NULL);
+    group->name_id = g_strdup(name_id);
+    group->name = g_strdup(name);
+    group->ui_name = g_strdup(ui_name);
+    group->is_installed = is_installed;
+    group->pkg_types = pkg_types;
+    group->grp_types = grp_types;
+    return group;
+}
+
+// environment destructor
+static void hif_swdb_env_finalize(GObject *object)
+{
+    G_OBJECT_CLASS (hif_swdb_env_parent_class)->finalize (object);
+}
+
+// environment Class initialiser
+static void
+hif_swdb_env_class_init(HifSwdbEnvClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = hif_swdb_env_finalize;
+}
+
+// environment Object initialiser
+static void
+hif_swdb_env_init(HifSwdbEnv *self)
+{
+    self->eid = 0;
+    self->swdb = NULL;
+}
+
+/**
+ * hif_swdb_env_new:
+ *
+ * Creates a new #HifSwdbEnv.
+ *
+ * Returns: a #HifSwdbEnv
+ **/
+HifSwdbEnv* hif_swdb_env_new(	    const gchar* name_id,
+									const gchar* name,
+									const gchar* ui_name,
+									gint pkg_types,
+									gint grp_types)
+{
+    HifSwdbEnv *env = g_object_new(HIF_TYPE_SWDB_ENV, NULL);
+    env->name_id = g_strdup(name_id);
+    env->name = g_strdup(name);
+    env->ui_name = g_strdup(ui_name);
+    env->pkg_types = pkg_types;
+    env->grp_types = grp_types;
+    return env;
 }
 
 /******************************* Functions *************************************/
@@ -692,39 +790,174 @@ static gint _insert_id_name (sqlite3 *db, const gchar *table, gint id, const gch
   	return 0;
 }
 
-//add new group package
-gint hif_swdb_add_group_package (HifSwdb *self, gint gid, const gchar *name)
+static gint _insert_group_additional(   HifSwdb *self,
+                                        HifSwdbGroup *group,
+                                        GPtrArray *data,
+                                        const gchar *table)
 {
     if (hif_swdb_open(self))
-    return 1;
-
-    gint rc = _insert_id_name (self->db, "GROUPS_PACKAGE", gid, name);
+        return 1;
+    for(guint i = 0; i < data->len; i++)
+    {
+        _insert_id_name (self->db, table, group->gid, (gchar *)g_ptr_array_index(data, i));
+    }
 	hif_swdb_close(self);
-  	return rc;
+  	return 0;
+}
+
+//add new group package
+/**
+* hif_swdb_group_add_package:
+* @packages: (element-type utf8)(transfer container): list of constants
+*/
+gint hif_swdb_group_add_package (       HifSwdbGroup *group,
+                                        GPtrArray *packages)
+{
+    if(group->gid)
+        return _insert_group_additional(group->swdb, group, packages, "GROUPS_PACKAGE");
+    else
+        return 0;
 }
 
 //add new group exclude
-gint hif_swdb_add_group_exclude (HifSwdb *self, gint gid, const gchar *name)
+/**
+* hif_swdb_group_add_exclude:
+* @exclude: (element-type utf8)(transfer container): list of constants
+*/
+gint hif_swdb_group_add_exclude (       HifSwdbGroup *group,
+                                        GPtrArray *exclude)
 {
-
-    if (hif_swdb_open(self))
-    return 1;
-
-    gint rc = _insert_id_name (self->db, "GROUPS_EXCLUDE", gid, name);
-	hif_swdb_close(self);
-  	return rc;
+    if(group->gid)
+        return _insert_group_additional(group->swdb, group, exclude, "GROUPS_EXCLUDE");
+    else
+        return 0;
 }
 
 //add new environments exclude
-gint hif_swdb_add_environments_exclude (HifSwdb *self, gint eid, const gchar *name)
+/**
+* hif_swdb_env_add_exclude:
+* @exclude: (element-type utf8)(transfer container): list of constants
+*/
+gint hif_swdb_env_add_exclude (     HifSwdbEnv *env,
+                                    GPtrArray *exclude)
 {
+    if(env->eid)
+    {
+        if (hif_swdb_open(env->swdb))
+            return 1;
+        for(guint i = 0; i < exclude->len; i++)
+        {
+            _insert_id_name (env->swdb->db, "ENVIRONMENTS_EXCLUDE", env->eid, (gchar *)g_ptr_array_index(exclude, i));
+        }
+        hif_swdb_close(env->swdb);
+        return 0;
+    }
+    else
+        return 1;
+}
 
+static gint _group_id_to_gid(sqlite3 *db, const gchar *group_id)
+{
+    sqlite3_stmt *res;
+    const gchar* sql = S_GID_BY_NAME_ID;
+    DB_PREP(db, sql, res);
+    DB_BIND(res, "@id", group_id);
+    return DB_FIND(res);
+}
+
+/**
+* hif_swdb_env_add_group:
+* @groups: (element-type utf8)(transfer container): list of constants
+*/
+gint hif_swdb_env_add_group (   HifSwdbEnv *env,
+                                GPtrArray *groups)
+{
+    if(env->eid)
+    {
+        if (hif_swdb_open(env->swdb))
+            return 1;
+        const gchar *sql = I_ENV_GROUP;
+        gint gid;
+        for(guint i = 0; i < groups->len; i++)
+        {
+            //bind group_id to gid
+            gid = _group_id_to_gid(env->swdb->db, (const gchar*)g_ptr_array_index(groups, i));
+            if (!gid)
+                continue;
+            sqlite3_stmt *res;
+            DB_PREP(env->swdb->db, sql, res);
+            DB_BIND_INT(res, "@eid", env->eid);
+            DB_BIND_INT(res, "@gid", gid);
+            DB_STEP(res);
+        }
+        hif_swdb_close(env->swdb);
+        return 0;
+    }
+    else
+        return 1;
+}
+
+static void _add_group  (   sqlite3 *db,
+                            HifSwdbGroup *group)
+{
+    sqlite3_stmt *res;
+    const gchar *sql = I_GROUP;
+    DB_PREP(db, sql, res);
+    DB_BIND(res, "@name_id", group->name_id);
+    DB_BIND(res, "@name", group->name);
+    DB_BIND(res, "@ui_name", group->ui_name);
+    DB_BIND_INT(res, "@is_installed", group->is_installed);
+    DB_BIND_INT(res, "@pkg_types", group->pkg_types);
+    DB_BIND_INT(res, "@grp_types", group->grp_types);
+    DB_STEP(res);
+    group->gid = sqlite3_last_insert_rowid(db);
+}
+
+gint hif_swdb_add_group (   HifSwdb *self,
+                            HifSwdbGroup *group)
+{
     if (hif_swdb_open(self))
-    return 1;
+        return 1;
+    _add_group  (self->db, group);
+    hif_swdb_close(self);
+    return 0;
+}
 
-    gint rc = _insert_id_name (self->db, "ENVIRONMENTS_EXCLUDE", eid, name);
-	hif_swdb_close(self);
-  	return rc;
+static void _add_env(sqlite3 *db, HifSwdbEnv *env)
+{
+    sqlite3_stmt *res;
+    const gchar *sql = I_ENV;
+    DB_PREP(db, sql, res);
+    DB_BIND(res, "@name_id", env->name_id);
+    DB_BIND(res, "@name", env->name);
+    DB_BIND(res, "@ui_name", env->ui_name);
+    DB_BIND_INT(res, "@pkg_types", env->pkg_types);
+    DB_BIND_INT(res, "@grp_types", env->grp_types);
+    DB_STEP(res);
+    env->eid = sqlite3_last_insert_rowid(db);
+
+}
+
+gint hif_swdb_add_env (     HifSwdb *self,
+                            HifSwdbEnv *env)
+{
+    if (hif_swdb_open(self))
+        return 1;
+    _add_env  (self->db, env);
+    hif_swdb_close(self);
+    return 0;
+}
+
+/**
+ * hif_swdb_new_SwdbGroup
+ *
+ * Returns: (transfer full) : #HifSwdbGroup
+ **/
+HifSwdbGroup *hif_swdb_new_SwdbGroup    (HifSwdb *self)
+{
+    HifSwdbGroup *group = hif_swdb_group_new(NULL,NULL,NULL,0,0,0);
+    group->swdb = self;
+    return group;
 }
 
 /***************************** REPO PERSISTOR ********************************/
@@ -1043,6 +1276,22 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
     return NULL;
 }
 
+static void _resolve_package_state  (   HifSwdb *self,
+                                        HifSwdbPkg *pkg)
+{
+    sqlite3_stmt *res;
+    const gchar *sql = S_PACKAGE_STATE;
+    DB_PREP(self->db, sql, res);
+    DB_BIND_INT(res, "@pid", pkg->pid);
+    if (sqlite3_step(res) == SQLITE_ROW)
+    {
+        gint state_code = sqlite3_column_int(res, 2);
+        pkg->done = sqlite3_column_int(res, 1);
+        sqlite3_finalize(res);
+        pkg->state = _look_for_desc(self->db, "STATE_TYPE", state_code);
+    }
+}
+
 static HifSwdbPkg *_get_package_by_pid (    sqlite3 *db,
                                             const gint pid)
 {
@@ -1053,16 +1302,17 @@ static HifSwdbPkg *_get_package_by_pid (    sqlite3 *db,
     if (sqlite3_step(res) == SQLITE_ROW)
     {
         HifSwdbPkg *pkg = hif_swdb_pkg_new(
-            (gchar *)sqlite3_column_text(res, 0), //name
-            (gchar *)sqlite3_column_text(res, 1), //epoch
-            (gchar *)sqlite3_column_text(res, 2), //version
-            (gchar *)sqlite3_column_text(res, 3), //release
-            (gchar *)sqlite3_column_text(res, 4), //arch
-            (gchar *)sqlite3_column_text(res, 5), //checksum_data
-            (gchar *)sqlite3_column_text(res, 6), //checksum_type
+            (gchar *)sqlite3_column_text(res, 1), //name
+            (gchar *)sqlite3_column_text(res, 2), //epoch
+            (gchar *)sqlite3_column_text(res, 3), //version
+            (gchar *)sqlite3_column_text(res, 4), //release
+            (gchar *)sqlite3_column_text(res, 5), //arch
+            (gchar *)sqlite3_column_text(res, 6), //checksum_data
+            (gchar *)sqlite3_column_text(res, 7), //checksum_type
             NULL //type for now
         );
-        gint type = sqlite3_column_int(res, 7); //unresolved type
+        gint type = sqlite3_column_int(res, 8); //unresolved type
+        pkg->pid = pid;
         sqlite3_finalize(res);
         pkg->type = _look_for_desc(db, "PACKAGE_TYPE", type);
         return pkg;
@@ -1094,6 +1344,7 @@ GPtrArray *hif_swdb_get_packages_by_tid(   HifSwdb *self,
         pkg = _get_package_by_pid(self->db, pid);
         if(pkg)
         {
+            _resolve_package_state(self, pkg);
             g_ptr_array_add(node, (gpointer) pkg);
         }
     }

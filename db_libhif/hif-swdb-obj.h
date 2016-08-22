@@ -41,6 +41,9 @@ struct _HifSwdbPkg
 	const gchar *checksum_data;
 	const gchar *checksum_type;
 	const gchar *type;
+	gboolean done;
+	gchar 	*state;
+	gint 	pid;
 };
 
 HifSwdbPkg* hif_swdb_pkg_new(   const gchar* name,
@@ -109,6 +112,54 @@ HifSwdbTransData* hif_swdb_transdata_new(	gint tdid,
 											gint ORIGINAL_TD_ID,
 											gchar *reason,
 											gchar *state);
+
+//holder for group
+
+#define HIF_TYPE_SWDB_GROUP ( hif_swdb_group_get_type())
+G_DECLARE_FINAL_TYPE ( HifSwdbGroup, hif_swdb_group, HIF, SWDB_GROUP, GObject)
+struct _HifSwdbGroup
+{
+	GObject parent_instance;
+	gint gid;
+	const gchar* name_id;
+	const gchar* name;
+	const gchar* ui_name;
+	gint is_installed;
+	gint pkg_types;
+	gint grp_types;
+	HifSwdb *swdb;
+};
+
+HifSwdbGroup* hif_swdb_group_new(
+									const gchar* name_id,
+									const gchar* name,
+									const gchar* ui_name,
+									gint is_installed,
+									gint pkg_types,
+									gint grp_types);
+
+//holder for environment
+
+#define HIF_TYPE_SWDB_ENV ( hif_swdb_env_get_type())
+G_DECLARE_FINAL_TYPE ( HifSwdbEnv, hif_swdb_env, HIF, SWDB_ENV, GObject)
+struct _HifSwdbEnv
+{
+	GObject parent_instance;
+	gint eid;
+	const gchar* name_id;
+	const gchar* name;
+	const gchar* ui_name;
+	gint pkg_types;
+	gint grp_types;
+	HifSwdb *swdb;
+};
+
+HifSwdbEnv* hif_swdb_env_new(
+									const gchar* name_id,
+									const gchar* name,
+									const gchar* ui_name,
+									gint pkg_types,
+									gint grp_types);
 
 G_END_DECLS
 

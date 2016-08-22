@@ -23,6 +23,9 @@
 #ifndef _HIF_SWDB_SQL
 #define _HIF_SWDB_SQL
 
+#define I_GROUP "Insert into GROUPS values(null, @name_id, @name, @ui_name, @is_installed, @pkg_types, @grp_types)"
+#define I_ENV "Insert into ENVIRONMENTS values(null, @name_id, @name, @ui_name, @pkg_types, @grp_types)"
+#define I_ENV_GROUP "insert into ENVIRONMENTS_GROUPS values(null, @eid, @gid)"
 #define INSERT_PKG "insert into PACKAGE values(null,@name,@epoch,@version,@release,@arch,@cdata,@ctype,@type)"
 #define INSERT_OUTPUT "insert into OUTPUT values(null,@tid,@msg,@type)"
 #define INSERT_TRANS_BEG "insert into TRANS values(null,@beg,null,@rpmdbv,@cmdline,@loginuid,@releasever,null)"
@@ -73,14 +76,16 @@
   " sql_nameVerRel LIKE @pat OR sql_nevra LIKE @pat OR sql_envra LIKE @pat)"
 
 
-#define S_PACKAGE_BY_PID "SELECT name,epoch,version,release,arch,checksum_data,checksum_type,type FROM PACKAGE WHERE P_ID=@pid"
+#define S_PACKAGE_BY_PID "SELECT * FROM PACKAGE WHERE P_ID=@pid"
 
 #define S_TRANS "SELECT * from TRANS ORDER BY T_ID DESC"
 #define S_TRANS_W_LIMIT "SELECT * from TRANS ORDER BY T_ID DESC LIMIT @limit"
 #define S_TRANS_COMP "SELECT * from TRANS WHERE end_timestamp is not null or end_timestamp!='' ORDER BY T_ID DESC"
 #define S_TRANS_COMP_W_LIMIT "SELECT * from TRANS WHERE end_timestamp is not null or end_timestamp!='' ORDER BY T_ID DESC LIMIT @limit"
-
 #define S_TRANS_DATA_BY_TID "SELECT * FROM TRANS_DATA WHERE T_ID=@tid"
+#define S_PACKAGE_STATE "select TD_ID,done,state from PACAKGE_DATA join TRANS_DATA using (PD_ID) where P_ID=@pid order by TD_ID desc limit 1"
+#define S_GID_BY_NAME_ID "Select G_ID from GROUPS where name_id LIKE @id"
+
 //CREATION OF tables
 
 #define C_PKG_DATA 		"CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"\
