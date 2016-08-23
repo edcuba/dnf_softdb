@@ -1023,13 +1023,35 @@ GPtrArray *hif_swdb_groups_by_pattern   (HifSwdb *self,
     hif_swdb_close(self);
     return node;
 }
+
+static inline GPtrArray *_get_list_from_table(sqlite3_stmt *res)
+{
+    GPtrArray *node = g_ptr_array_new();
+    while(sqlite3_step(res) == SQLITE_ROW)
+    {
+        g_ptr_array_add(node, (gpointer) sqlite3_column_text(res,0));
+    }
+    sqlite3_finalize(res);
+    return node;
+}
+
 /**
 * hif_swdb_group_get_exclude:
 * Returns: (element-type utf8)(array)(transfer container): list of utf8
 */
 GPtrArray * hif_swdb_group_get_exclude(HifSwdbGroup *self)
 {
-    //TODO
+    if(!self->gid)
+        return NULL;
+    if (hif_swdb_open(self->swdb) )
+        return NULL;
+    sqlite3_stmt *res;
+    const gchar *sql = S_GROUP_EXCLUDE_BY_ID;
+    DB_PREP(self->swdb->db, sql, res);
+    DB_BIND_INT(res, "@gid", self->gid);
+    GPtrArray *node = _get_list_from_table(res);
+    hif_swdb_close(self->swdb);
+    return node;
 }
 
 /**
@@ -1038,7 +1060,17 @@ GPtrArray * hif_swdb_group_get_exclude(HifSwdbGroup *self)
 */
 GPtrArray * hif_swdb_group_get_full_list(HifSwdbGroup *self)
 {
-    //TODO
+    if(!self->gid)
+        return NULL;
+    if (hif_swdb_open(self->swdb) )
+        return NULL;
+    sqlite3_stmt *res;
+    const gchar *sql = S_GROUP_PACKAGE_BY_ID;
+    DB_PREP(self->swdb->db, sql, res);
+    DB_BIND_INT(res, "@gid", self->gid);
+    GPtrArray *node = _get_list_from_table(res);
+    hif_swdb_close(self->swdb);
+    return node;
 }
 
 /**
@@ -1048,31 +1080,54 @@ GPtrArray * hif_swdb_group_get_full_list(HifSwdbGroup *self)
 gint hif_swdb_group_update_full_list(   HifSwdbGroup *group,
                                         GPtrArray *full_list)
 {
-    //TODO
+    if(!group->gid)
+        return 1;
+    if (hif_swdb_open(group->swdb) )
+        return 1;
+    sqlite3_stmt *res;
+    const gchar *sql = R_FULL_LIST_BY_ID;
+    DB_PREP(group->swdb->db, sql, res);
+    DB_BIND_INT(res, "@gid", group->gid);
+    DB_STEP(res);
+    hif_swdb_close(group->swdb);
+    hif_swdb_group_add_package(group, full_list);
+    return 0;
 }
 
 gint hif_swdb_update_group( HifSwdb *self,
                             HifSwdbGroup *group)
 {
     //TODO
+    return 0;
 }
 
 /**
-* hif_swdb_group_get_grp_list:
+* hif_swdb_env_get_grp_list:
 * Returns: (element-type utf8)(array)(transfer container): list of utf8
 */
 GPtrArray *hif_swdb_env_get_grp_list    (HifSwdbEnv* self)
 {
     //TODO
+    return NULL;
 }
 
 /**
-* hif_swdb_group_get_exclude:
+* hif_swdb_env_get_exclude:
 * Returns: (element-type utf8)(array)(transfer container): list of utf8
 */
 GPtrArray *hif_swdb_env_get_exclude    (HifSwdbEnv* self)
 {
-    //TODO
+    if(!self->eid)
+        return NULL;
+    if (hif_swdb_open(self->swdb) )
+        return NULL;
+    sqlite3_stmt *res;
+    const gchar *sql = S_ENV_EXCLUDE_BY_ID;
+    DB_PREP(self->swdb->db, sql, res);
+    DB_BIND_INT(res, "@eid", self->eid);
+    GPtrArray *node = _get_list_from_table(res);
+    hif_swdb_close(self->swdb);
+    return node;
 }
 
 /***************************** REPO PERSISTOR ********************************/

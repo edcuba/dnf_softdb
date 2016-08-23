@@ -87,6 +87,11 @@
 #define S_GID_BY_NAME_ID "Select G_ID from GROUPS where name_id LIKE @id"
 #define S_GROUP_BY_NAME_ID "select * from GROUPS where name_id LIKE @id"
 #define S_GROUPS_BY_PATTERN "SELECT * from GROUPS where name_id LIKE @pat or name LIKE @pat or ui_name LIKE @pat"
+#define S_GROUP_EXCLUDE_BY_ID "SELECT name FROM GROUPS_EXCLUDE where G_ID=@gid"
+#define S_GROUP_PACKAGE_BY_ID "SELECT name FROM GROUPS_PACKAGE where G_ID=@gid"
+#define S_ENV_EXCLUDE_BY_ID "SELECT name FROM ENVIRONMENTS_EXCLUDE where E_ID=@eid"
+
+#define R_FULL_LIST_BY_ID "DELETE FROM GROUPS_PACKAGE WHERE G_ID=@gid"
 //CREATION OF tables
 
 #define C_PKG_DATA 		"CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"\
