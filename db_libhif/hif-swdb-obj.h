@@ -122,8 +122,8 @@ struct _HifSwdbGroup
 	GObject parent_instance;
 	gint gid;
 	const gchar* name_id;
-	const gchar* name;
-	const gchar* ui_name;
+	gchar* name;
+	gchar* ui_name;
 	gint is_installed;
 	gint pkg_types;
 	gint grp_types;
@@ -132,11 +132,22 @@ struct _HifSwdbGroup
 
 HifSwdbGroup* hif_swdb_group_new(
 									const gchar* name_id,
-									const gchar* name,
-									const gchar* ui_name,
+									gchar* name,
+									gchar* ui_name,
 									gint is_installed,
 									gint pkg_types,
-									gint grp_types);
+									gint grp_types,
+									HifSwdb *swdb);
+
+GPtrArray * hif_swdb_group_get_exclude(HifSwdbGroup *self);
+GPtrArray * hif_swdb_group_get_full_list(HifSwdbGroup *self);
+gint hif_swdb_group_update_full_list(   HifSwdbGroup *group,
+                                        GPtrArray *full_list);
+gint hif_swdb_group_add_package (       HifSwdbGroup *group,
+                                        GPtrArray *packages);
+
+gint hif_swdb_group_add_exclude (       HifSwdbGroup *group,
+                                        GPtrArray *exclude);
 
 //holder for environment
 
@@ -147,8 +158,8 @@ struct _HifSwdbEnv
 	GObject parent_instance;
 	gint eid;
 	const gchar* name_id;
-	const gchar* name;
-	const gchar* ui_name;
+	gchar* name;
+	gchar* ui_name;
 	gint pkg_types;
 	gint grp_types;
 	HifSwdb *swdb;
@@ -156,10 +167,14 @@ struct _HifSwdbEnv
 
 HifSwdbEnv* hif_swdb_env_new(
 									const gchar* name_id,
-									const gchar* name,
-									const gchar* ui_name,
+									gchar* name,
+									gchar* ui_name,
 									gint pkg_types,
 									gint grp_types);
+
+GPtrArray *hif_swdb_env_get_grp_list    (HifSwdbEnv* self);
+
+GPtrArray *hif_swdb_env_get_exclude    (HifSwdbEnv* self);
 
 G_END_DECLS
 

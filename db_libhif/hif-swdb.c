@@ -362,11 +362,12 @@ hif_swdb_group_init(HifSwdbGroup *self)
  * Returns: a #HifSwdbGroup
  **/
 HifSwdbGroup* hif_swdb_group_new(	const gchar* name_id,
-									const gchar* name,
-									const gchar* ui_name,
+									gchar* name,
+									gchar* ui_name,
 									gint is_installed,
 									gint pkg_types,
-									gint grp_types)
+									gint grp_types,
+                                    HifSwdb *swdb)
 {
     HifSwdbGroup *group = g_object_new(HIF_TYPE_SWDB_GROUP, NULL);
     group->name_id = g_strdup(name_id);
@@ -375,6 +376,7 @@ HifSwdbGroup* hif_swdb_group_new(	const gchar* name_id,
     group->is_installed = is_installed;
     group->pkg_types = pkg_types;
     group->grp_types = grp_types;
+    group->swdb = swdb;
     return group;
 }
 
@@ -408,8 +410,8 @@ hif_swdb_env_init(HifSwdbEnv *self)
  * Returns: a #HifSwdbEnv
  **/
 HifSwdbEnv* hif_swdb_env_new(	    const gchar* name_id,
-									const gchar* name,
-									const gchar* ui_name,
+									gchar* name,
+									gchar* ui_name,
 									gint pkg_types,
 									gint grp_types)
 {
@@ -948,16 +950,129 @@ gint hif_swdb_add_env (     HifSwdb *self,
     return 0;
 }
 
-/**
- * hif_swdb_new_SwdbGroup
- *
- * Returns: (transfer full) : #HifSwdbGroup
- **/
-HifSwdbGroup *hif_swdb_new_SwdbGroup    (HifSwdb *self)
+static HifSwdbGroup *_get_group(sqlite3 *db,
+                                const gchar *name_id)
 {
-    HifSwdbGroup *group = hif_swdb_group_new(NULL,NULL,NULL,0,0,0);
-    group->swdb = self;
+    sqlite3_stmt *res;
+    const gchar *sql = S_GROUP_BY_NAME_ID;
+    DB_PREP(db, sql, res);
+    DB_BIND(res, "@id", name_id);
+    if (sqlite3_step(res) == SQLITE_ROW)
+    {
+        HifSwdbGroup *group = hif_swdb_group_new(
+                                name_id, //name_id
+                                (gchar*)sqlite3_column_text(res, 2),//name
+                                (gchar*)sqlite3_column_text(res, 3),//ui_name
+                                sqlite3_column_int(res, 4),//is_installed
+                                sqlite3_column_int(res, 5),//pkg_types
+                                sqlite3_column_int(res, 6),//grp_types
+                                NULL); //swdb
+        group->gid = sqlite3_column_int(res,0);
+        sqlite3_finalize(res);
+        return group;
+    }
+    return NULL;
+}
+
+/**
+* hif_swdb_get_group:
+* Returns: (transfer full): #HifSwdbGroup
+*/
+HifSwdbGroup *hif_swdb_get_group	(HifSwdb * self,
+	 								const gchar* name_id)
+{
+    if (hif_swdb_open(self))
+        return NULL;
+
+    HifSwdbGroup *group = _get_group(self->db, name_id);
+    if(group)
+        group->swdb = self;
+    hif_swdb_close(self);
     return group;
+}
+
+/**
+* hif_swdb_groups_by_pattern:
+* Returns: (element-type HifSwdbGroup)(array)(transfer container): list of #HifSwdbGroup
+*/
+GPtrArray *hif_swdb_groups_by_pattern   (HifSwdb *self,
+                                        const gchar *pattern)
+{
+    if (hif_swdb_open(self))
+        return NULL;
+    GPtrArray *node = g_ptr_array_new();
+    sqlite3_stmt *res;
+    const gchar *sql = S_GROUPS_BY_PATTERN;
+    DB_PREP(self->db, sql, res);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    DB_BIND(res, "@pat", pattern);
+    while(sqlite3_step(res) == SQLITE_ROW)
+    {
+        HifSwdbGroup *group = hif_swdb_group_new(
+                                (const gchar*)sqlite3_column_text(res,1), //name_id
+                                (gchar*)sqlite3_column_text(res, 2),//name
+                                (gchar*)sqlite3_column_text(res, 3),//ui_name
+                                sqlite3_column_int(res, 4),//is_installed
+                                sqlite3_column_int(res, 5),//pkg_types
+                                sqlite3_column_int(res, 6),//grp_types
+                                self); //swdb
+        group->gid = sqlite3_column_int(res,0);
+        g_ptr_array_add(node, (gpointer) group);
+    }
+    hif_swdb_close(self);
+    return node;
+}
+/**
+* hif_swdb_group_get_exclude:
+* Returns: (element-type utf8)(array)(transfer container): list of utf8
+*/
+GPtrArray * hif_swdb_group_get_exclude(HifSwdbGroup *self)
+{
+    //TODO
+}
+
+/**
+* hif_swdb_group_get_full_list:
+* Returns: (element-type utf8)(array)(transfer container): list of utf8
+*/
+GPtrArray * hif_swdb_group_get_full_list(HifSwdbGroup *self)
+{
+    //TODO
+}
+
+/**
+* hif_swdb_group_update_full_list:
+* @full_list: (element-type utf8)(transfer container): list of constants
+*/
+gint hif_swdb_group_update_full_list(   HifSwdbGroup *group,
+                                        GPtrArray *full_list)
+{
+    //TODO
+}
+
+gint hif_swdb_update_group( HifSwdb *self,
+                            HifSwdbGroup *group)
+{
+    //TODO
+}
+
+/**
+* hif_swdb_group_get_grp_list:
+* Returns: (element-type utf8)(array)(transfer container): list of utf8
+*/
+GPtrArray *hif_swdb_env_get_grp_list    (HifSwdbEnv* self)
+{
+    //TODO
+}
+
+/**
+* hif_swdb_group_get_exclude:
+* Returns: (element-type utf8)(array)(transfer container): list of utf8
+*/
+GPtrArray *hif_swdb_env_get_exclude    (HifSwdbEnv* self)
+{
+    //TODO
 }
 
 /***************************** REPO PERSISTOR ********************************/

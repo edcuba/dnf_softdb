@@ -85,7 +85,8 @@
 #define S_TRANS_DATA_BY_TID "SELECT * FROM TRANS_DATA WHERE T_ID=@tid"
 #define S_PACKAGE_STATE "select TD_ID,done,state from PACAKGE_DATA join TRANS_DATA using (PD_ID) where P_ID=@pid order by TD_ID desc limit 1"
 #define S_GID_BY_NAME_ID "Select G_ID from GROUPS where name_id LIKE @id"
-
+#define S_GROUP_BY_NAME_ID "select * from GROUPS where name_id LIKE @id"
+#define S_GROUPS_BY_PATTERN "SELECT * from GROUPS where name_id LIKE @pat or name LIKE @pat or ui_name LIKE @pat"
 //CREATION OF tables
 
 #define C_PKG_DATA 		"CREATE TABLE PACKAGE_DATA ( PD_ID integer PRIMARY KEY,"\

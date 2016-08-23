@@ -50,12 +50,6 @@ gint hif_swdb_create_db (HifSwdb *self);
 /* Remove old and create new */
 gint hif_swdb_reset_db (HifSwdb *self);
 
-gint hif_swdb_group_add_package (       HifSwdbGroup *group,
-                                        GPtrArray *packages);
-
-gint hif_swdb_group_add_exclude (       HifSwdbGroup *group,
-                                        GPtrArray *exclude);
-
 gint hif_swdb_env_add_exclude (     HifSwdbEnv *env,
                                     GPtrArray *exclude);
 
@@ -196,7 +190,14 @@ gint hif_swdb_add_group (   HifSwdb *self,
 gint hif_swdb_add_env (     HifSwdb *self,
                             HifSwdbEnv *env);
 
-HifSwdbGroup *hif_swdb_new_SwdbGroup    (HifSwdb *self);
+HifSwdbGroup *hif_swdb_get_group	(HifSwdb * self,
+	 								const gchar* name_id);
+
+GPtrArray *hif_swdb_groups_by_pattern   (HifSwdb *self,
+                                        const gchar *pattern);
+
+gint hif_swdb_update_group( HifSwdb *self,
+                            HifSwdbGroup *group);
 
 G_END_DECLS
 
