@@ -165,16 +165,18 @@ struct _HifSwdbEnv
 	HifSwdb *swdb;
 };
 
-HifSwdbEnv* hif_swdb_env_new(
-									const gchar* name_id,
+HifSwdbEnv* hif_swdb_env_new(		const gchar* name_id,
 									gchar* name,
 									gchar* ui_name,
 									gint pkg_types,
-									gint grp_types);
+									gint grp_types,
+									HifSwdb *swdb);
 
-GPtrArray *hif_swdb_env_get_grp_list    (HifSwdbEnv* self);
+GPtrArray *hif_swdb_env_get_grp_list    (HifSwdbEnv* env);
 
 GPtrArray *hif_swdb_env_get_exclude    (HifSwdbEnv* self);
+
+gboolean hif_swdb_env_is_installed  (HifSwdbEnv *env );
 
 G_END_DECLS
 
