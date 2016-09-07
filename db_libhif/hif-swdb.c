@@ -54,8 +54,9 @@ struct _HifSwdb
     gchar   *path;
     sqlite3 *db;
     gboolean ready; //db opened
-  	gboolean path_changed; //dont forget to free memory...
+  	gboolean path_changed;
   	gboolean running; //if true, db will not be closed
+    gchar *releasever;
 };
 
 G_DEFINE_TYPE(HifSwdb, hif_swdb, G_TYPE_OBJECT)
@@ -66,17 +67,6 @@ G_DEFINE_TYPE(HifSwdbGroup, hif_swdb_group, G_TYPE_OBJECT)
 G_DEFINE_TYPE(HifSwdbEnv, hif_swdb_env, G_TYPE_OBJECT)
 
 /* Table structs */
-struct package_t
-{
-  	const gchar *name;
-  	const gchar *epoch;
-  	const gchar *version;
-  	const gchar *release;
-  	const gchar *arch;
-  	const gchar *checksum_data;
-  	const gchar *checksum_type;
-  	gint type;
-};
 
 struct output_t
 {
@@ -158,6 +148,7 @@ hif_swdb_init(HifSwdb *self)
 	self->ready = 0;
   	self->path_changed = 0;
   	self->running = 0;
+    self->releasever = NULL;
 }
 
 /**
@@ -167,10 +158,14 @@ hif_swdb_init(HifSwdb *self)
  *
  * Returns: a #HifSwdb
  **/
-HifSwdb* hif_swdb_new(void)
+HifSwdb* hif_swdb_new   (const gchar* releasever)
 {
     HifSwdb *swdb = g_object_new(HIF_TYPE_SWDB, NULL);
-  	return swdb;
+    if (releasever)
+    {
+        swdb->releasever = g_strdup(releasever);
+    }
+    return swdb;
 }
 
 
@@ -195,6 +190,8 @@ hif_swdb_pkg_init(HifSwdbPkg *self)
     self->done = 0;
     self->state = NULL;
     self->pid = 0;
+    self->ui_from_repo = NULL;
+    self->swdb = NULL;
 }
 
 /**
@@ -1353,17 +1350,12 @@ static gint _bind_repo_by_name (sqlite3 *db, const gchar *name)
 
 /**************************** PACKAGE PERSISTOR ******************************/
 
-/**
- * _package_insert: (skip)
- * Insert package into database
- * @db - database
- * @package - package meta struct
- **/
-static gint _package_insert(sqlite3 *db, struct package_t *package)
+static gint _package_insert(HifSwdb *self, HifSwdbPkg *package)
 {
+    gint type_id = hif_swdb_get_package_type(self,package->type);
     sqlite3_stmt *res;
    	const gchar *sql = INSERT_PKG;
-	DB_PREP(db,sql,res);
+	DB_PREP(self->db,sql,res);
   	DB_BIND(res, "@name", package->name);
   	DB_BIND(res, "@epoch", package->epoch);
   	DB_BIND(res, "@version", package->version);
@@ -1371,9 +1363,9 @@ static gint _package_insert(sqlite3 *db, struct package_t *package)
   	DB_BIND(res, "@arch", package->arch);
   	DB_BIND(res, "@cdata", package->checksum_data);
   	DB_BIND(res, "@ctype", package->checksum_type);
-  	DB_BIND_INT(res, "@type", package->type);
+  	DB_BIND_INT(res, "@type", type_id);
 	DB_STEP(res);
-  	return sqlite3_last_insert_rowid(db);
+  	return sqlite3_last_insert_rowid(self->db);
 }
 
 gint hif_swdb_add_package_nevracht(	HifSwdb *self,
@@ -1389,10 +1381,9 @@ gint hif_swdb_add_package_nevracht(	HifSwdb *self,
   	if (hif_swdb_open(self))
     	return 1;
   	DB_TRANS_BEGIN
- 	struct package_t package = {name, epoch, version, release, arch,
-		checksum_data, checksum_type, hif_swdb_get_package_type(self,type)};
-
-  	gint rc = _package_insert(self->db, &package);
+ 	HifSwdbPkg *package = hif_swdb_pkg_new(name, epoch, version, release, arch,
+		checksum_data, checksum_type, type);
+    gint rc = _package_insert(self, package);
   	DB_TRANS_END
   	hif_swdb_close(self);
   	return rc;
@@ -1712,6 +1703,7 @@ GPtrArray *hif_swdb_get_packages_by_tid(   HifSwdb *self,
         pkg = _get_package_by_pid(self->db, pid);
         if(pkg)
         {
+            pkg->swdb = self;
             _resolve_package_state(self, pkg);
             g_ptr_array_add(node, (gpointer) pkg);
         }
@@ -1719,6 +1711,50 @@ GPtrArray *hif_swdb_get_packages_by_tid(   HifSwdb *self,
     DB_TRANS_END
     hif_swdb_close(self);
     return node;
+}
+
+const gchar* hif_swdb_pkg_ui_from_repo	( HifSwdbPkg *self)
+{
+    if(self->ui_from_repo)
+        return g_strdup(self->ui_from_repo);
+    if(!self->swdb || !self->pid || hif_swdb_open(self->swdb))
+        return "(unknown)";
+    sqlite3_stmt *res;
+    gchar *sql = (gchar*)S_REPO_FROM_PID;
+    gint pdid = 0;
+    DB_PREP(self->swdb->db, sql, res);
+    DB_BIND_INT(res, "@pid", self->pid);
+    gchar *r_name = NULL;
+    if(sqlite3_step(res) == SQLITE_ROW)
+    {
+        r_name = g_strdup((const gchar*)sqlite3_column_text(res, 0));
+        pdid = sqlite3_column_int(res, 1);
+    }
+    sqlite3_finalize(res);
+
+    //now we find out if package wasnt installed from some other releasever
+    if (pdid && self->swdb->releasever)
+    {
+        gchar *cur_releasever = NULL;;
+        sql = (gchar*)S_RELEASEVER_FROM_PDID;
+        DB_PREP(self->swdb->db, sql, res);
+        DB_BIND_INT(res, "@pdid", pdid);
+        if(sqlite3_step(res) == SQLITE_ROW)
+        {
+            cur_releasever = g_strdup((const gchar*)sqlite3_column_text(res, 0));
+        }
+        sqlite3_finalize(res);
+        if(g_strcmp0(cur_releasever, self->swdb->releasever))
+        {
+            hif_swdb_close(self->swdb);
+            return g_strjoin(NULL, "@", r_name, "/", cur_releasever, NULL);
+        }
+    }
+    hif_swdb_close(self->swdb);
+    if(r_name)
+        return r_name;
+    else
+        return "(unknown)";
 }
 
 /**************************** RPM DATA PERSISTOR *****************************/
@@ -1928,15 +1964,15 @@ const gchar *hif_swdb_trans_cmdline (   HifSwdb *self,
 
 static void _resolve_altered    (GPtrArray *trans)
 {
-    for(guint i = trans->len-1; i > 0; --i)
+    for(guint i = 0; i < (trans->len-1); i++)
     {
         HifSwdbTrans *las = (HifSwdbTrans *)g_ptr_array_index(trans, i);
-        HifSwdbTrans *obj = (HifSwdbTrans *)g_ptr_array_index(trans, i-1);
+        HifSwdbTrans *obj = (HifSwdbTrans *)g_ptr_array_index(trans, i+1);
         //FIXME: this is probably wrong...
         if(!g_strcmp0(las->rpmdb_version, obj->rpmdb_version)) //rpmdb_version changed
         {
-            obj->altered_lt_rpmdb = 1;
-            las->altered_gt_rpmdb = 1;
+            obj->altered_gt_rpmdb = 1;
+            las->altered_lt_rpmdb = 1;
         }
     }
 }
@@ -2031,7 +2067,7 @@ GPtrArray *hif_swdb_trans_old(	HifSwdb *self,
     DB_TRANS_BEGIN
     GPtrArray *node = g_ptr_array_new();
     sqlite3_stmt *res;
-    if(tids->len)
+    if(tids && tids->len)
         limit = 0;
     const gchar *sql;
     if (limit && complete_only)
@@ -2050,7 +2086,7 @@ GPtrArray *hif_swdb_trans_old(	HifSwdb *self,
     while(sqlite3_step(res) == SQLITE_ROW)
     {
         tid = sqlite3_column_int(res, 0);
-        if(tids->len)
+        if(tids && tids->len)
         {
             match = 0;
             for(guint i = 0; i < tids->len; ++i)
@@ -2081,6 +2117,19 @@ GPtrArray *hif_swdb_trans_old(	HifSwdb *self,
     DB_TRANS_END
     hif_swdb_close(self);
     return node;
+}
+
+/**
+* hif_swdb_last:
+* Returns: (transfer full): #HifSwdbTrans
+**/
+HifSwdbTrans *hif_swdb_last (HifSwdb *self)
+{
+    GPtrArray *node = hif_swdb_trans_old(self, NULL, 1, 1);
+    if (!node || !node->len)
+        return NULL;
+    HifSwdbTrans *trans = g_ptr_array_index(node, 0);
+    return trans;
 }
 
 

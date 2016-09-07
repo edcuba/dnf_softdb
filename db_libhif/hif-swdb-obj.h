@@ -44,6 +44,8 @@ struct _HifSwdbPkg
 	gboolean done;
 	gchar 	*state;
 	gint 	pid;
+	gchar * ui_from_repo;
+	HifSwdb *swdb;
 };
 
 HifSwdbPkg* hif_swdb_pkg_new(   const gchar* name,
@@ -54,6 +56,7 @@ HifSwdbPkg* hif_swdb_pkg_new(   const gchar* name,
                                 const gchar* checksum_data,
                                 const gchar* checksum_type,
                                 const gchar* type);
+const gchar* hif_swdb_pkg_ui_from_repo	( HifSwdbPkg *self);
 
 //holder for history transaction
 

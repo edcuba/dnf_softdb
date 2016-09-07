@@ -35,7 +35,7 @@ G_DECLARE_FINAL_TYPE (HifSwdb, hif_swdb, HIF,SWDB, GObject) // structure,functio
 
 #include "hif-swdb-obj.h"
 
-HifSwdb *hif_swdb_new(void);
+HifSwdb *hif_swdb_new (const gchar* releasever);
 
 const gchar* hif_swdb_get_path (HifSwdb *self);
 
@@ -210,6 +210,7 @@ gint hif_swdb_log_group_trans(  HifSwdb *self,
                                 const gint tid,
                                 GPtrArray *installing,
                                 GPtrArray *removing);
+HifSwdbTrans *hif_swdb_last (HifSwdb *self);
 
 G_END_DECLS
 
