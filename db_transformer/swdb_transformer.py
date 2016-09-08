@@ -189,7 +189,7 @@ def GET_YUMDB_PACKAGES(cursor):
 #input argument parser
 parser = argparse.ArgumentParser(description="Unified DNF software database (swdb) migration tool")
 parser.add_argument('-i', '--input', help='DNF yumDB and history folder, default: /var/lib/dnf/', default='/var/lib/dnf/')
-parser.add_argument('-o', '--output', help='output SQLiteDB file, default: /var/lib/dnf/swdb.sqlite', default="/var/lib/dnf/swdb.sqlite")
+parser.add_argument('-o', '--output', help='output SQLiteDB file, default: /var/lib/dnf/history/swdb.sqlite', default="/var/lib/dnf/history/swdb.sqlite")
 parser.add_argument('-f', '--force', help='Force overwrite', action='store_true', default=False)
 args = parser.parse_args()
 no = set(['no','n',''])

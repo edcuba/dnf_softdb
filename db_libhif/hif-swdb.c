@@ -22,12 +22,14 @@
 
 /* TODO:    -   Fix fixmes
             -   Replace structs with Gobjects
-            -   Get rid of all classes in dnf/yum/history.py
+            -   Get rid of yumdb (yumdb.get_package calls etc)
+            -   Get rid of remaining classes in dnf/yum/history.py
             -   Think about GOM
+            -   Replace GSList an GPtrArray with GArray when using integers
  */
 
 
-#define default_path "/var/lib/dnf/swdb.sqlite"
+#define default_path "/var/lib/dnf/history/swdb.sqlite"
 
 #define DB_PREP(db, sql, res) assert(_db_prepare(db, sql, &res))
 #define DB_BIND(res, id, source) assert(_db_bind(res, id, source))
@@ -65,6 +67,7 @@ G_DEFINE_TYPE(HifSwdbTrans, hif_swdb_trans, G_TYPE_OBJECT) //history transaction
 G_DEFINE_TYPE(HifSwdbTransData, hif_swdb_transdata, G_TYPE_OBJECT) //history transaction data
 G_DEFINE_TYPE(HifSwdbGroup, hif_swdb_group, G_TYPE_OBJECT)
 G_DEFINE_TYPE(HifSwdbEnv, hif_swdb_env, G_TYPE_OBJECT)
+G_DEFINE_TYPE(HifSwdbPkgData, hif_swdb_pkgdata, G_TYPE_OBJECT)
 
 /* Table structs */
 
@@ -89,18 +92,6 @@ struct trans_end_t
   	const gint tid;
    	const gchar *end_timestamp;
   	const gint return_code;
-};
-
-struct package_data_t
-{
-  	const gint   pid;
-    const gint   rid;
-    const gchar *from_repo_revision;
-  	const gchar *from_repo_timestamp;
-  	const gchar *installed_by;
-  	const gchar *changed_by;
-  	const gchar *installonly;
-  	const gchar *origin_url;
 };
 
 struct trans_data_beg_t
@@ -158,12 +149,17 @@ hif_swdb_init(HifSwdb *self)
  *
  * Returns: a #HifSwdb
  **/
-HifSwdb* hif_swdb_new   (const gchar* releasever)
+HifSwdb* hif_swdb_new   (   const gchar* db_path,
+                            const gchar* releasever)
 {
     HifSwdb *swdb = g_object_new(HIF_TYPE_SWDB, NULL);
     if (releasever)
     {
         swdb->releasever = g_strdup(releasever);
+    }
+    if (db_path)
+    {
+        swdb->path = g_strjoin("/",db_path,"swdb.sqlite",NULL);
     }
     return swdb;
 }
@@ -222,6 +218,56 @@ HifSwdbPkg* hif_swdb_pkg_new(   const gchar* name,
   	return swdbpkg;
 }
 
+// PKG DATA Destructor
+static void hif_swdb_pkgdata_finalize(GObject *object)
+{
+    G_OBJECT_CLASS (hif_swdb_pkgdata_parent_class)->finalize (object);
+}
+
+// PKG DATA Class initialiser
+static void
+hif_swdb_pkgdata_class_init(HifSwdbPkgDataClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = hif_swdb_pkgdata_finalize;
+}
+
+// PKG DATA Object initialiser
+static void
+hif_swdb_pkgdata_init(HifSwdbPkgData *self)
+{
+    self->from_repo = NULL;
+    self->from_repo_revision = NULL;
+  	self->from_repo_timestamp = NULL;
+  	self->installed_by = NULL;
+  	self->changed_by = NULL;
+  	self->installonly = NULL;
+  	self->origin_url = NULL;
+}
+
+/**
+ * hif_swdb_pkgdata_new:
+ *
+ * Creates a new #HifSwdbPkgData.
+ *
+ * Returns: a #HifSwdbPkgData
+ **/
+HifSwdbPkgData* hif_swdb_pkgdata_new(   const gchar* from_repo_revision,
+                                        const gchar* from_repo_timestamp,
+                                        const gchar* installed_by,
+                                        const gchar* changed_by,
+                                        const gchar* installonly,
+                                        const gchar* origin_url)
+{
+    HifSwdbPkgData *pkgdata = g_object_new(HIF_TYPE_SWDB_PKGDATA, NULL);
+    pkgdata->from_repo_revision = g_strdup(from_repo_revision);
+    pkgdata->from_repo_timestamp = g_strdup(from_repo_timestamp);
+    pkgdata->installed_by = g_strdup(installed_by);
+    pkgdata->changed_by = g_strdup(changed_by);
+    pkgdata->installonly = g_strdup(installonly);
+    pkgdata->origin_url = g_strdup(origin_url);
+  	return pkgdata;
+}
 
 // TRANS Destructor
 static void hif_swdb_trans_finalize(GObject *object)
@@ -635,6 +681,7 @@ static GSList *_get_subpatterns(const gchar* pattern)
     return subpatterns;
 }
 
+// Pattern on input, transaction IDs on output
 static GSList *_simple_search(sqlite3* db, const gchar * pattern)
 {
     GSList *tids = NULL;
@@ -657,17 +704,22 @@ static GSList *_simple_search(sqlite3* db, const gchar * pattern)
         {
             gint pdid = GPOINTER_TO_INT(pdids->data);
             pdids = pdids->next;
-            gint tid = _tid_from_pdid(db, pdid);
-            if(tid)
+            GArray *tids_for_pdid = _tids_from_pdid(db, pdid);
+            for (guint i = 0; i< tids_for_pdid->len; i++)
             {
-                tids = g_slist_append (tids, GINT_TO_POINTER(tid));
+                tids = g_slist_append (tids, GINT_TO_POINTER(g_array_index(tids_for_pdid, gint, i)));
             }
         }
     }
     return tids;
 }
 
-static GSList *_extended_search (sqlite3* db, const gchar *pattern)
+/*
+* Provides package search with extended pattern
+* expected_result parameter sets expected output
+* Set 0 for PID or 1 for TID
+*/
+static GSList *_extended_search (sqlite3* db, const gchar *pattern, const gint expected_result)
 {
     GSList *tids = NULL;
     //split pattern into subpatterns - minimalising data processed
@@ -711,6 +763,11 @@ static GSList *_extended_search (sqlite3* db, const gchar *pattern)
     DB_BIND(res, "@pat", pattern);
     DB_BIND(res, "@pat", pattern);
     gint pid = DB_FIND(res);
+    if (!expected_result)
+    {
+        tids = g_slist_append (tids, GINT_TO_POINTER(pid));
+        return tids;
+    };
     if(pid)
     {
         GSList *pdids = _all_pdid_for_pid(db, pid);
@@ -718,10 +775,10 @@ static GSList *_extended_search (sqlite3* db, const gchar *pattern)
         {
             gint pdid = GPOINTER_TO_INT(pdids->data);
             pdids = pdids->next;
-            gint tid = _tid_from_pdid(db, pdid);
-            if(tid)
+            GArray *tids_for_pdid = _tids_from_pdid(db, pdid);
+            for (guint i = 0; i< tids_for_pdid->len; i++)
             {
-                tids = g_slist_append (tids, GINT_TO_POINTER(tid));
+                tids = g_slist_append (tids, GINT_TO_POINTER(g_array_index(tids_for_pdid, gint, i)));
             }
         }
     }
@@ -754,7 +811,7 @@ GSList *hif_swdb_search (   HifSwdb *self,
             continue;
         }
         //need for extended search
-        GSList *extended = _extended_search(self->db, pattern);
+        GSList *extended = _extended_search(self->db, pattern, 1);
         if(extended)
         {
             tids = g_slist_concat(tids, extended);
@@ -1348,6 +1405,16 @@ static gint _bind_repo_by_name (sqlite3 *db, const gchar *name)
 	}
 }
 
+static const gchar* _repo_by_rid(   sqlite3 *db,
+                                    const gint rid)
+{
+    sqlite3_stmt *res;
+    const gchar *sql = S_REPO_BY_RID;
+    DB_PREP(db, sql, res);
+    DB_BIND_INT(res, "@rid", rid);
+    return DB_FIND_STR(res);
+}
+
 /**************************** PACKAGE PERSISTOR ******************************/
 
 static gint _package_insert(HifSwdb *self, HifSwdbPkg *package)
@@ -1448,41 +1515,33 @@ const gint 	hif_swdb_get_pid_by_nevracht(	HifSwdb *self,
     return 0;
 }
 
-static gint _package_data_update (sqlite3 *db, struct package_data_t *package_data)
+static gint _package_data_update (  sqlite3 *db,
+                                    const gint pid,
+                                    HifSwdbPkgData *pkgdata)
 {
+    gint rid = _bind_repo_by_name(db, pkgdata->from_repo);
   	sqlite3_stmt *res;
    	const gchar *sql = UPDATE_PKG_DATA;
 	DB_PREP(db,sql,res);
-  	DB_BIND_INT(res, "@pid", package_data->pid);
-  	DB_BIND_INT(res, "@rid", package_data->rid);
-  	DB_BIND(res, "@repo_r", package_data->from_repo_revision);
-  	DB_BIND(res, "@repo_t", package_data->from_repo_timestamp);
-  	DB_BIND(res, "@installed_by", package_data->installed_by);
-  	DB_BIND(res, "@changed_by", package_data->changed_by);
-  	DB_BIND(res, "@installonly", package_data->installonly);
-  	DB_BIND(res, "@origin_url", package_data->origin_url);
+  	DB_BIND_INT(res, "@pid", pid);
+  	DB_BIND_INT(res, "@rid", rid);
+  	DB_BIND(res, "@repo_r", pkgdata->from_repo_revision);
+  	DB_BIND(res, "@repo_t", pkgdata->from_repo_timestamp);
+  	DB_BIND(res, "@installed_by", pkgdata->installed_by);
+  	DB_BIND(res, "@changed_by", pkgdata->changed_by);
+  	DB_BIND(res, "@installonly", pkgdata->installonly);
+  	DB_BIND(res, "@origin_url", pkgdata->origin_url);
 	DB_STEP(res);
   	return 0;
 }
 
 gint 	hif_swdb_log_package_data(	HifSwdb *self,
-									const gint   pid,
-                                  	const gchar *from_repo,
-                                  	const gchar *from_repo_revision,
-                                  	const gchar *from_repo_timestamp,
-                                  	const gchar *installed_by,
-                                  	const gchar *changed_by,
-                                  	const gchar *installonly,
-                                  	const gchar *origin_url )
+                                    const gint pid,
+									HifSwdbPkgData *pkgdata )
 {
   	if (hif_swdb_open(self))
     	return 1;
-
-  	struct package_data_t package_data = { pid, _bind_repo_by_name(self->db, from_repo),
-	  from_repo_revision, from_repo_timestamp, installed_by, changed_by, installonly, origin_url};
-
-  	gint rc = _package_data_update(self->db, &package_data);
-
+  	gint rc = _package_data_update(self->db, pid, pkgdata);
   	hif_swdb_close(self);
   	return rc;
 }
@@ -1528,6 +1587,24 @@ static gint _tid_from_pdid (	sqlite3 *db,
   	DB_PREP(db, sql, res);
   	DB_BIND_INT(res, "@pdid", pdid);
   	return DB_FIND(res);
+}
+
+static GArray * _tids_from_pdid (	sqlite3 *db,
+								    const gint pdid )
+{
+  	sqlite3_stmt *res;
+    GArray *tids = g_array_new(0,0,sizeof(gint));
+  	const gchar *sql = FIND_TIDS_FROM_PDID;
+  	DB_PREP(db, sql, res);
+  	DB_BIND_INT(res, "@pdid", pdid);
+    gint tid = 0;
+    while(sqlite3_step(res) == SQLITE_ROW)
+    {
+        tid = sqlite3_column_int(res, 0);
+        g_array_append_val(tids, tid);
+    }
+    sqlite3_finalize(res);
+  	return tids;
 }
 
 static GSList *_pids_by_tid (    sqlite3 *db,
@@ -1651,6 +1728,34 @@ static void _resolve_package_state  (   HifSwdb *self,
     }
 }
 
+static HifSwdbPkgData *_get_package_data_by_pid (   sqlite3 *db,
+                                                    const gint pid)
+{
+    sqlite3_stmt *res;
+    const gchar *sql = S_PACKAGE_DATA_BY_PID;
+    DB_PREP(db, sql, res);
+    DB_BIND_INT(res, "@pid", pid);
+    if (sqlite3_step(res) == SQLITE_ROW)
+    {
+        HifSwdbPkgData *pkgdata = hif_swdb_pkgdata_new(
+            (gchar *)sqlite3_column_text(res, 3), //from_repo_revision
+            (gchar *)sqlite3_column_text(res, 4), //from_repo_timestamp
+            (gchar *)sqlite3_column_text(res, 5), //installed_by
+            (gchar *)sqlite3_column_text(res, 6), //changed_by
+            (gchar *)sqlite3_column_text(res, 7), //installonly
+            (gchar *)sqlite3_column_text(res, 8) //origin_url
+        );
+        pkgdata->pdid = sqlite3_column_int(res, 0); //pdid
+        pkgdata->pid = pid;
+        gint rid = sqlite3_column_int(res, 2);
+        sqlite3_finalize(res);
+        pkgdata->from_repo = (gchar *)_repo_by_rid(db, rid); //from repo
+        return pkgdata;
+    }
+    sqlite3_finalize(res);
+    return NULL;
+}
+
 static HifSwdbPkg *_get_package_by_pid (    sqlite3 *db,
                                             const gint pid)
 {
@@ -1755,6 +1860,48 @@ const gchar* hif_swdb_pkg_ui_from_repo	( HifSwdbPkg *self)
         return r_name;
     else
         return "(unknown)";
+}
+
+/**
+* hif_swdb_package_by_pattern:
+* Returns: (transfer full): #HifSwdbPkg
+*/
+HifSwdbPkg *hif_swdb_package_by_pattern (   HifSwdb *self,
+                                            const gchar *pattern)
+{
+    if (hif_swdb_open(self))
+        return NULL;
+    GSList *node = _extended_search(self->db, pattern, 0);
+    gint pid = GPOINTER_TO_INT(node->data);
+    if (!pid)
+    {
+        hif_swdb_close(self);
+        return NULL;
+    }
+    HifSwdbPkg *pkg = _get_package_by_pid(self->db, pid);
+    hif_swdb_close(self);
+    return pkg;
+}
+
+/**
+* hif_swdb_package_data_by_pattern:
+* Returns: (transfer full): #HifSwdbPkgData
+*/
+HifSwdbPkgData *hif_swdb_package_data_by_pattern (  HifSwdb *self,
+                                                    const gchar *pattern)
+{
+    if (hif_swdb_open(self))
+        return NULL;
+    GSList *node = _extended_search(self->db, pattern, 0);
+    gint pid = GPOINTER_TO_INT(node->data);
+    if (!pid)
+    {
+        hif_swdb_close(self);
+        return NULL;
+    }
+    HifSwdbPkgData *pkgdata = _get_package_data_by_pid(self->db, pid);
+    hif_swdb_close(self);
+    return pkgdata;
 }
 
 /**************************** RPM DATA PERSISTOR *****************************/
