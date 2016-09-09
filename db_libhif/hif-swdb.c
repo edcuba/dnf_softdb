@@ -1415,6 +1415,27 @@ static const gchar* _repo_by_rid(   sqlite3 *db,
     return DB_FIND_STR(res);
 }
 
+const gchar *hif_swdb_repo_by_pattern (     HifSwdb *self,
+                                            const gchar *pattern)
+{
+    if (hif_swdb_open(self))
+    	return NULL;
+    GSList *node = _extended_search(self->db, pattern, 0);
+    gint pid = GPOINTER_TO_INT(node->data);
+    if(!pid)
+    {
+        hif_swdb_close(self);
+        return "unknown";
+    }
+    sqlite3_stmt *res;
+    const gchar *sql = S_REPO_FROM_PID2;
+    DB_PREP(self->db, sql, res);
+    DB_BIND_INT(res, "@pid", pid);
+    const gchar *r_name = DB_FIND_STR(res);
+    hif_swdb_close(self);
+    return r_name;
+}
+
 /**************************** PACKAGE PERSISTOR ******************************/
 
 static gint _package_insert(HifSwdb *self, HifSwdbPkg *package)
@@ -1710,6 +1731,22 @@ const gchar *hif_swdb_get_pkg_attr( HifSwdb *self,
     }
     hif_swdb_close(self);
     return NULL;
+}
+
+const gchar *hif_swdb_attr_by_pattern (   HifSwdb *self,
+                                            const gchar *attr,
+                                            const gchar *pattern)
+{
+    if (hif_swdb_open(self))
+    	return NULL;
+    GSList *node = _extended_search(self->db, pattern, 0);
+    gint pid = GPOINTER_TO_INT(node->data);
+    if(!pid)
+    {
+        hif_swdb_close(self);
+        return NULL;
+    }
+    return hif_swdb_get_pkg_attr(self, pid, attr);
 }
 
 static void _resolve_package_state  (   HifSwdb *self,

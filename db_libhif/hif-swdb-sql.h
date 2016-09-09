@@ -101,6 +101,7 @@
 #define S_IS_INSTALLED_BY_EID "SELECT is_installed FROM ENVIRONMENTS_GROUPS join GROUPS using(G_ID) where E_ID=@eid"
 #define S_GROUP_NAME_ID_BY_EID "SELECT name_id FROM ENVIRONMENTS_GROUPS join GROUPS using(G_ID) where E_ID=@eid"
 #define S_REPO_FROM_PID "SELECT name, PD_ID FROM PACKAGE_DATA join REPO using(R_ID) where P_ID=@pid"
+#define S_REPO_FROM_PID2 "SELECT name FROM PACKAGE_DATA join REPO using(R_ID) where P_ID=@pid"
 #define S_RELEASEVER_FROM_PDID "SELECT releasever from TRANS_DATA join TRANS using(T_ID) where PD_ID=@pdid"
 
 #define U_GROUP_COMMIT "UPDATE GROUPS SET is_installed=1 where name_id=@id"

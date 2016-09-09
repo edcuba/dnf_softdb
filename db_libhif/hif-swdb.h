@@ -218,6 +218,13 @@ HifSwdbPkg *hif_swdb_package_by_pattern (   HifSwdb *self,
 HifSwdbPkgData *hif_swdb_package_data_by_pattern (  HifSwdb *self,
                                                     const gchar *pattern);
 
+const gchar *hif_swdb_attr_by_pattern (   HifSwdb *self,
+                                            const gchar *attr,
+                                            const gchar *pattern);
+
+const gchar *hif_swdb_repo_by_pattern (     HifSwdb *self,
+                                            const gchar *pattern);
+
 G_END_DECLS
 
 #endif
