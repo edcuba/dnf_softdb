@@ -39,7 +39,7 @@ def TRANS_DATA_INSERT(cursor,data):
     cursor.execute('INSERT INTO TRANS_DATA VALUES (null,?,?,?,?,?,?,?)', data)
 
 def TRANS_INSERT(cursor,data):
-    cursor.execute('INSERT INTO TRANS VALUES (?,?,?,?,?,?,?,?)', data)
+    cursor.execute('INSERT INTO TRANS VALUES (?,?,?,?,?,?,?,?,?)', data)
 
 #create binding with repo - returns R_ID
 def BIND_REPO(cursor,name):
@@ -253,7 +253,7 @@ PACKAGE_DATA = ['P_ID','R_ID','from_repo_revision','from_repo_timestamp',
 PACKAGE = ['P_ID','name','epoch','version','release','arch','checksum_data','checksum_type','type']
 CHECKSUM_DATA = ['checksum_data']
 TRANS_DATA = ['T_ID','PD_ID','G_ID','done','ORIGINAL_TD_ID','reason','state']
-TRANS = ['T_ID','beg_timestamp','end_timestamp','RPMDB_version','cmdline','loginuid','releasever','return_code']
+TRANS = ['T_ID','beg_timestamp','end_timestamp','beg_RPMDB_version', 'end_RPMDB_version','cmdline','loginuid','releasever','return_code']
 GROUPS = ['name_id','name','ui_name','is_installed','pkg_types','grp_types']
 ENVIRONMENTS = ['name_id','name','ui_name','pkg_types','grp_types']
 RPM_DATA = ["P_ID","buildtime","buildhost","license","packager","size","sourcerpm","url","vendor","committer","committime"]
